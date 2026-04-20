@@ -7,21 +7,24 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Reflector } from '@nestjs/core';
-import { createHmac, timingSafeEqual } from 'crypto';
+import { ModuleRef } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
-import type { AuthUser } from '../decorators/current-user.decorator';
+import type { AuthProviderName, AuthUser } from '../decorators/current-user.decorator';
+import { verifyHs256Jwt } from '../auth/jwt.util';
+import { UsersService } from '../../modules/users/users.service';
 
 /**
- * Supabase Auth 가 발급한 JWT(HS256)를 검증하는 전역 Guard.
+ * Supabase Auth(그리고 백엔드가 발급한 Supabase 호환 JWT)를 검증하는 전역 Guard.
  *
  * 동작:
- *   1. `@Public()` 가 달린 핸들러는 무조건 통과.
- *   2. Authorization: Bearer <token> 헤더를 읽고, HS256 시그니처를
- *      `SUPABASE_JWT_SECRET` 으로 검증.
- *   3. payload.sub, payload.email 을 `request.user` 에 주입.
+ *   1. `@Public()` 핸들러는 무조건 통과.
+ *   2. `Authorization: Bearer <token>` → HS256 검증 (`SUPABASE_JWT_SECRET`).
+ *   3. 검증 성공 시 `(provider, sub)` 로 **JIT 프로비저닝** → `users` + `user_auth_providers` 행 보장.
+ *   4. `request.user` 에 `{ supabaseId, userId, email, provider }` 주입.
  *
- * NOTE: 운영 환경에서는 `jose` 라이브러리 + JWKS 캐시를 쓰는 것을 권장.
- *       여기서는 추가 의존성 없이 동작하도록 최소 구현만 포함한다.
+ * 개발 편의:
+ *   - `SUPABASE_JWT_SECRET` 미설정 + `AUTH_DEV_BYPASS=true` (기본 dev 환경) → 헤더 무시하고 `dev-anon` 통과.
+ *   - 운영(`NODE_ENV=production`) 에서는 시크릿 필수 + 바이패스 비허용.
  */
 @Injectable()
 export class SupabaseJwtGuard implements CanActivate {
@@ -30,9 +33,10 @@ export class SupabaseJwtGuard implements CanActivate {
   constructor(
     private readonly config: ConfigService,
     private readonly reflector: Reflector,
+    private readonly moduleRef: ModuleRef,
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
@@ -46,12 +50,12 @@ export class SupabaseJwtGuard implements CanActivate {
 
     const secret = this.config.get<string>('supabase.jwtSecret');
     const isProd = this.config.get<string>('app.nodeEnv') === 'production';
+    const devBypass = this.config.get<boolean>('auth.devBypass') ?? true;
 
-    // 개발 환경 & Supabase 미설정 → 인증 건너뛰고 dev-anon 주입.
-    // (헤더가 있어도 검증하지 않는다. 프론트/통합 환경 세팅 전에도 수동 테스트 가능.)
     if (!secret) {
       if (isProd) throw new UnauthorizedException('JWT secret not configured');
-      req.user = { supabaseId: 'dev-anon', userId: null, email: null };
+      if (!devBypass) throw new UnauthorizedException('JWT secret not configured');
+      req.user = { supabaseId: 'dev-anon', userId: null, email: null, provider: null };
       return true;
     }
 
@@ -62,48 +66,70 @@ export class SupabaseJwtGuard implements CanActivate {
     }
     const token = auth.slice('Bearer '.length).trim();
 
-    const payload = this.verifyHs256(token, secret);
+    const payload = verifyHs256Jwt(token, secret);
     if (!payload) throw new UnauthorizedException('Invalid token');
 
-    req.user = {
-      supabaseId: String(payload.sub ?? ''),
-      userId: null, // 필요 시 users 테이블 매핑 후 주입 (Interceptor/Service 단에서)
-      email: typeof payload.email === 'string' ? payload.email : null,
-    };
+    const sub = String(payload.sub ?? '');
+    if (!sub) throw new UnauthorizedException('Invalid token: missing sub');
+
+    const email =
+      typeof payload.email === 'string'
+        ? payload.email
+        : typeof (payload.user_metadata as Record<string, unknown> | undefined)?.email === 'string'
+          ? ((payload.user_metadata as Record<string, unknown>).email as string)
+          : null;
+
+    const provider = this.extractProvider(payload as unknown as Record<string, unknown>);
+
+    // JIT 프로비저닝 — users + user_auth_providers 보장.
+    // Public 이 아니면서 인증에 성공한 모든 요청에서 실행. 향후 per-request 캐시로 최적화 가능.
+    let userId: bigint | null = null;
+    if (provider) {
+      try {
+        const users = await this.moduleRef.get(UsersService, { strict: false });
+        const user = await users.findOrCreateFromSocialLogin({
+          provider,
+          providerUserId: sub,
+          email,
+          name: this.pickString(payload.user_metadata, ['name', 'full_name', 'nickname']),
+          avatarUrl: this.pickString(payload.user_metadata, ['avatar_url', 'picture']),
+        });
+        userId = user.id;
+      } catch (err) {
+        this.logger.warn(`JIT provisioning failed for sub=${sub}: ${(err as Error).message}`);
+      }
+    }
+
+    req.user = { supabaseId: sub, userId, email, provider };
     return true;
   }
 
-  private verifyHs256(token: string, secret: string): Record<string, unknown> | null {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const [encodedHeader, encodedPayload, encodedSignature] = parts;
-
-    const header = this.decodeJson(encodedHeader);
-    if (!header || header.alg !== 'HS256') return null;
-
-    const expected = createHmac('sha256', secret)
-      .update(`${encodedHeader}.${encodedPayload}`)
-      .digest();
-    const provided = Buffer.from(
-      encodedSignature.replace(/-/g, '+').replace(/_/g, '/'),
-      'base64',
-    );
-    if (expected.length !== provided.length) return null;
-    if (!timingSafeEqual(expected, provided)) return null;
-
-    const payload = this.decodeJson(encodedPayload);
-    if (!payload) return null;
-    if (typeof payload.exp === 'number' && Date.now() / 1000 >= payload.exp) return null;
-    return payload;
+  private extractProvider(
+    payload: Record<string, unknown>,
+  ): AuthProviderName | null {
+    const candidates = [
+      (payload.app_metadata as Record<string, unknown> | undefined)?.provider,
+      payload.provider,
+    ];
+    for (const c of candidates) {
+      if (typeof c === 'string') {
+        const v = c.toLowerCase();
+        if (v === 'google' || v === 'kakao' || v === 'naver') return v;
+      }
+    }
+    return null;
   }
 
-  private decodeJson(base64url: string): Record<string, unknown> | null {
-    try {
-      const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
-      const text = Buffer.from(base64, 'base64').toString('utf8');
-      return JSON.parse(text) as Record<string, unknown>;
-    } catch {
-      return null;
+  private pickString(
+    obj: unknown,
+    keys: string[],
+  ): string | undefined {
+    if (!obj || typeof obj !== 'object') return undefined;
+    const o = obj as Record<string, unknown>;
+    for (const k of keys) {
+      const v = o[k];
+      if (typeof v === 'string' && v.length > 0) return v;
     }
+    return undefined;
   }
 }
