@@ -7,12 +7,16 @@ import { createParamDecorator, ExecutionContext } from '@nestjs/common';
  *   @Get('me')
  *   getMe(@CurrentUser() user: AuthUser) { ... }
  */
+export type AuthProviderName = 'google' | 'kakao' | 'naver';
+
 export interface AuthUser {
-  /** Supabase Auth UUID (sub claim) */
+  /** Supabase Auth UUID (sub claim) — Naver 중개 로그인 시에도 동일 스키마 UUID 사용 */
   supabaseId: string;
-  /** DB 내 users.id (JWT 커스텀 클레임 또는 매핑 조회 결과) */
+  /** DB 내 users.id (Guard 가 JIT 프로비저닝 후 주입) */
   userId: bigint | null;
   email: string | null;
+  /** 소셜 제공자 — JWT `app_metadata.provider` 또는 `provider` 커스텀 클레임 */
+  provider: AuthProviderName | null;
 }
 
 export const CurrentUser = createParamDecorator(
