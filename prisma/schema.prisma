@@ -1,0 +1,478 @@
+// =========================================================
+// Checkmate - Prisma Schema
+// Source of Truth for database and ORM
+// =========================================================
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["fullTextSearchPostgres"]
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// =========================================================
+// ENUMS
+// =========================================================
+enum Gender {
+  male
+  female
+  other
+  unknown
+}
+
+enum AuthProvider {
+  google
+  naver
+  kakao
+}
+
+enum BookingStatus {
+  booked
+  not_booked
+}
+
+enum TripStatus {
+  planning
+  preparing
+  completed
+}
+
+enum FlightDirection {
+  departure
+  return
+}
+
+enum ChecklistStatus {
+  not_started
+  preparing
+  completed
+}
+
+enum ChecklistGeneratedBy {
+  llm
+  template
+  hybrid
+}
+
+enum PrepType {
+  item
+  pre_booking
+  pre_departure_check
+  ai_recommend
+}
+
+enum BaggageType {
+  carry_on
+  checked
+  none
+}
+
+enum ChecklistItemSource {
+  llm
+  template
+  user_added
+}
+
+enum EditType {
+  text
+  add
+  del
+  reorder
+}
+
+enum CheckAction {
+  checked
+  unchecked
+}
+
+enum LlmStatus {
+  pending
+  success
+  failed
+}
+
+enum UserEventType {
+  search
+  detail_check
+  save
+  saved_list_open
+  edit_text
+  edit_add
+  edit_del
+  edit_reorder
+  prepare_action
+  re_search
+  missing_item_detection
+}
+
+// =========================================================
+// USER DOMAIN
+// =========================================================
+model User {
+  id              BigInt    @id @default(autoincrement())
+  email           String    @unique
+  nickname        String
+  profileImageUrl String?   @map("profile_image_url")
+  gender          Gender    @default(unknown)
+  birthDate       DateTime? @map("birth_date") @db.Date
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  authProviders UserAuthProvider[]
+  passports     UserPassport[]
+  trips         Trip[]
+  events        UserEvent[]
+  itemEdits     ChecklistItemEdit[]
+  itemChecks    ChecklistItemCheck[]
+
+  @@index([deletedAt])
+  @@map("users")
+}
+
+model UserAuthProvider {
+  id              BigInt       @id @default(autoincrement())
+  userId          BigInt       @map("user_id")
+  provider        AuthProvider
+  providerUserId  String       @map("provider_user_id")
+  accessTokenHash String       @map("access_token_hash")
+  linkedAt        DateTime     @default(now()) @map("linked_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+  @@map("user_auth_providers")
+}
+
+model UserPassport {
+  id        BigInt    @id @default(autoincrement())
+  userId    BigInt    @map("user_id")
+  countryId BigInt    @map("country_id")
+  isPrimary Boolean   @default(false) @map("is_primary")
+  expiresAt DateTime? @map("expires_at") @db.Date
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  country Country @relation(fields: [countryId], references: [id])
+
+  @@index([userId])
+  @@map("user_passports")
+}
+
+// =========================================================
+// MASTER DATA
+// =========================================================
+model Country {
+  id     BigInt @id @default(autoincrement())
+  code   String @unique // ISO-3166 alpha-2
+  nameKo String @map("name_ko")
+  nameEn String @map("name_en")
+
+  cities        City[]
+  passports     UserPassport[]
+  trips         Trip[]
+  itemTemplates ChecklistItemTemplate[]
+
+  @@map("countries")
+}
+
+model City {
+  id        BigInt  @id @default(autoincrement())
+  countryId BigInt  @map("country_id")
+  nameKo    String  @map("name_ko")
+  nameEn    String  @map("name_en")
+  iataCode  String? @map("iata_code")
+  isServed  Boolean @default(false) @map("is_served")
+
+  country    Country    @relation(fields: [countryId], references: [id])
+  tripCities TripCity[]
+
+  @@index([countryId])
+  @@index([iataCode])
+  @@map("cities")
+}
+
+model ChecklistCategory {
+  id        BigInt @id @default(autoincrement())
+  code      String @unique
+  labelKo   String @map("label_ko")
+  sortOrder Int    @map("sort_order")
+
+  items     ChecklistItem[]
+  templates ChecklistItemTemplate[]
+
+  @@map("checklist_categories")
+}
+
+model TravelStyle {
+  id       BigInt @id @default(autoincrement())
+  code     String @unique
+  labelKo  String @map("label_ko")
+  iconPath String @map("icon_path")
+
+  tripTravelStyles TripTravelStyle[]
+
+  @@map("travel_styles")
+}
+
+model CompanionType {
+  id      BigInt @id @default(autoincrement())
+  code    String @unique
+  labelKo String @map("label_ko")
+
+  tripCompanions TripCompanion[]
+
+  @@map("companion_types")
+}
+
+// =========================================================
+// TRIP DOMAIN
+// =========================================================
+model Trip {
+  id            BigInt        @id @default(autoincrement())
+  userId        BigInt        @map("user_id")
+  countryId     BigInt        @map("country_id")
+  title         String
+  tripStart     DateTime      @map("trip_start") @db.Date
+  tripEnd       DateTime      @map("trip_end") @db.Date
+  bookingStatus BookingStatus @map("booking_status")
+  status        TripStatus    @default(planning)
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  deletedAt     DateTime?     @map("deleted_at")
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  country Country @relation(fields: [countryId], references: [id])
+
+  cities         TripCity[]
+  flights        TripFlight[]
+  companions     TripCompanion[]
+  travelStyles   TripTravelStyle[]
+  checklist      Checklist?
+  llmGenerations LlmGeneration[]
+  events         UserEvent[]
+
+  @@index([userId, status])
+  @@index([deletedAt])
+  @@map("trips")
+}
+
+model TripCity {
+  id           BigInt    @id @default(autoincrement())
+  tripId       BigInt    @map("trip_id")
+  cityId       BigInt    @map("city_id")
+  orderIndex   Int       @map("order_index")
+  visitStart   DateTime? @map("visit_start") @db.Date
+  visitEnd     DateTime? @map("visit_end") @db.Date
+  isAutoSynced Boolean   @default(false) @map("is_auto_synced")
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  city City @relation(fields: [cityId], references: [id])
+
+  @@index([tripId, orderIndex])
+  @@map("trip_cities")
+}
+
+model TripFlight {
+  id            BigInt          @id @default(autoincrement())
+  tripId        BigInt          @map("trip_id")
+  direction     FlightDirection
+  flightNo      String          @map("flight_no")
+  airline       String
+  departureIata String          @map("departure_iata")
+  arrivalIata   String          @map("arrival_iata")
+  departAt      DateTime        @map("depart_at")
+  arriveAt      DateTime        @map("arrive_at")
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, direction])
+  @@map("trip_flights")
+}
+
+model TripCompanion {
+  id              BigInt  @id @default(autoincrement())
+  tripId          BigInt  @map("trip_id")
+  companionTypeId BigInt  @map("companion_type_id")
+  hasPet          Boolean @default(false) @map("has_pet")
+
+  trip          Trip          @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  companionType CompanionType @relation(fields: [companionTypeId], references: [id])
+
+  @@unique([tripId, companionTypeId])
+  @@map("trip_companions")
+}
+
+model TripTravelStyle {
+  id            BigInt @id @default(autoincrement())
+  tripId        BigInt @map("trip_id")
+  travelStyleId BigInt @map("travel_style_id")
+
+  trip        Trip        @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  travelStyle TravelStyle @relation(fields: [travelStyleId], references: [id])
+
+  @@unique([tripId, travelStyleId])
+  @@map("trip_travel_styles")
+}
+
+// =========================================================
+// CHECKLIST DOMAIN
+// =========================================================
+model Checklist {
+  id             BigInt               @id @default(autoincrement())
+  tripId         BigInt               @unique @map("trip_id")
+  status         ChecklistStatus      @default(not_started)
+  completionRate Decimal              @default(0) @map("completion_rate") @db.Decimal(5, 2)
+  generatedBy    ChecklistGeneratedBy @map("generated_by")
+  generatedAt    DateTime             @default(now()) @map("generated_at")
+
+  trip     Trip            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  items    ChecklistItem[]
+  archives GuideArchive[]
+
+  @@map("checklists")
+}
+
+model ChecklistItem {
+  id          BigInt              @id @default(autoincrement())
+  checklistId BigInt              @map("checklist_id")
+  categoryId  BigInt              @map("category_id")
+  templateId  BigInt?             @map("template_id")
+  title       String
+  description String?
+  detail      String?
+  prepType    PrepType            @map("prep_type")
+  baggageType BaggageType         @map("baggage_type")
+  source      ChecklistItemSource
+  orderIndex  Int                 @map("order_index")
+  isChecked   Boolean             @default(false) @map("is_checked")
+  checkedAt   DateTime?           @map("checked_at")
+  createdAt   DateTime            @default(now()) @map("created_at")
+  updatedAt   DateTime            @updatedAt @map("updated_at")
+  deletedAt   DateTime?           @map("deleted_at")
+
+  checklist Checklist              @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+  category  ChecklistCategory      @relation(fields: [categoryId], references: [id])
+  template  ChecklistItemTemplate? @relation(fields: [templateId], references: [id])
+
+  edits  ChecklistItemEdit[]
+  checks ChecklistItemCheck[]
+  events UserEvent[]
+
+  @@index([checklistId, orderIndex])
+  @@index([deletedAt])
+  @@map("checklist_items")
+}
+
+model ChecklistItemTemplate {
+  id          BigInt      @id @default(autoincrement())
+  categoryId  BigInt      @map("category_id")
+  countryId   BigInt?     @map("country_id")
+  title       String
+  description String?
+  detail      String?
+  prepType    PrepType    @map("prep_type")
+  baggageType BaggageType @map("baggage_type")
+  conditions  Json // weather / season / companion 조건
+  isEssential Boolean     @default(false) @map("is_essential")
+
+  category ChecklistCategory @relation(fields: [categoryId], references: [id])
+  country  Country?          @relation(fields: [countryId], references: [id])
+  items    ChecklistItem[]
+
+  @@index([categoryId])
+  @@index([countryId])
+  @@map("checklist_item_templates")
+}
+
+model GuideArchive {
+  id          BigInt   @id @default(autoincrement())
+  checklistId BigInt   @map("checklist_id")
+  name        String
+  snapshot    Json // 저장 시점의 items 스냅샷
+  archivedAt  DateTime @default(now()) @map("archived_at")
+
+  checklist Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
+
+  @@index([checklistId, archivedAt])
+  @@map("guide_archives")
+}
+
+// =========================================================
+// EDIT & CHECK LOG
+// =========================================================
+model ChecklistItemEdit {
+  id          BigInt   @id @default(autoincrement())
+  itemId      BigInt   @map("item_id")
+  userId      BigInt   @map("user_id")
+  editType    EditType @map("edit_type")
+  beforeValue Json?    @map("before_value")
+  afterValue  Json?    @map("after_value")
+  occurredAt  DateTime @default(now()) @map("occurred_at")
+
+  item ChecklistItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  user User          @relation(fields: [userId], references: [id])
+
+  @@index([itemId, occurredAt])
+  @@index([userId, occurredAt])
+  @@map("checklist_item_edits")
+}
+
+model ChecklistItemCheck {
+  id         BigInt      @id @default(autoincrement())
+  itemId     BigInt      @map("item_id")
+  userId     BigInt      @map("user_id")
+  action     CheckAction
+  occurredAt DateTime    @default(now()) @map("occurred_at")
+
+  item ChecklistItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  user User          @relation(fields: [userId], references: [id])
+
+  @@index([itemId, occurredAt])
+  @@index([userId, occurredAt])
+  @@map("checklist_item_checks")
+}
+
+// =========================================================
+// LLM & ANALYTICS
+// =========================================================
+model LlmGeneration {
+  id          BigInt    @id @default(autoincrement())
+  tripId      BigInt    @map("trip_id")
+  promptInput Json      @map("prompt_input")
+  responseRaw Json?     @map("response_raw")
+  model       String
+  tokensUsed  Int       @default(0) @map("tokens_used")
+  status      LlmStatus @default(pending)
+  generatedAt DateTime  @default(now()) @map("generated_at")
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId, generatedAt])
+  @@index([status])
+  @@map("llm_generations")
+}
+
+model UserEvent {
+  id         BigInt        @id @default(autoincrement())
+  userId     BigInt        @map("user_id")
+  tripId     BigInt?       @map("trip_id")
+  itemId     BigInt?       @map("item_id")
+  sessionId  String        @map("session_id")
+  eventType  UserEventType @map("event_type")
+  metadata   Json?
+  occurredAt DateTime      @default(now()) @map("occurred_at")
+
+  user User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trip Trip?          @relation(fields: [tripId], references: [id])
+  item ChecklistItem? @relation(fields: [itemId], references: [id])
+
+  @@index([userId, occurredAt])
+  @@index([sessionId])
+  @@index([eventType, occurredAt])
+  @@map("user_events")
+}
