@@ -114,7 +114,7 @@ export class SupabaseJwtGuard implements CanActivate {
     for (const c of candidates) {
       if (typeof c === 'string') {
         const v = c.toLowerCase();
-        if (v === 'google' || v === 'kakao' || v === 'naver') return v;
+        if (v === 'google' || v === 'kakao') return v;
       }
     }
     return null;

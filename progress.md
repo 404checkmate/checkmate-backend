@@ -14,7 +14,7 @@
 | Framework | **NestJS 11** | 5개 도메인(user/trip/checklist/llm/analytics)을 모듈 단위 DDD로 분리, Guard/Interceptor/Pipe 표준화, BullMQ·SSE 확장 용이 |
 | DB | **PostgreSQL 16** (로컬 Docker, 배포 시 Supabase/Neon 등) | `jsonb` + GIN 인덱스, 네이티브 enum, 부분 인덱스 — ERD의 JSON 중심·enum 다수·로그 테이블 특성에 정합 |
 | ORM | **Prisma 6** | 선언형 스키마 + 자동 마이그레이션, `Json` 타입·enum 1급 지원, 중첩 include 타입 안전 |
-| Auth | **Supabase Auth** (JWT 검증은 Nest `SupabaseJwtGuard`) | 프론트가 이미 Supabase 키를 전제, 관리형 OAuth(google/naver/kakao) |
+| Auth | **Supabase Auth** (JWT 검증은 Nest `SupabaseJwtGuard`) | 프론트가 이미 Supabase 키를 전제, 관리형 OAuth(google/kakao) |
 | Queue | **BullMQ + Redis** (의존성만 설치, 워커는 미구현) | LLM 비동기 호출 / 이벤트 배치 처리용 |
 | Validation | **class-validator + class-transformer** (DTO), **zod** (env) | DTO 는 Nest 표준 파이프, env 는 초기 부팅 시 즉시 실패 |
 | Security | **helmet**, CORS 화이트리스트 | 기본 하드닝 |

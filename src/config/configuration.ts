@@ -10,19 +10,12 @@ export default () => ({
     corsOrigin: process.env.CORS_ORIGIN ?? '*',
   },
   auth: {
-    // 네이버 OAuth 로그인 성공 후 프론트로 리다이렉트할 콜백 URL
-    // 프론트 `/auth/callback` 에서 토큰을 세션으로 확정.
+    // 소셜 로그인(Google/Kakao) 성공 후 프론트로 리다이렉트할 콜백 URL.
+    // 프론트 `/auth/callback` 에서 Supabase 세션을 확정한다.
     frontendCallbackUrl:
       process.env.FRONTEND_AUTH_CALLBACK_URL ?? 'http://localhost:5173/auth/callback',
     // Dev 바이패스 (SUPABASE_JWT_SECRET 미설정 시 dev-anon 으로 통과)
     devBypass: (process.env.AUTH_DEV_BYPASS ?? 'true') === 'true',
-  },
-  naver: {
-    clientId: process.env.NAVER_CLIENT_ID ?? '',
-    clientSecret: process.env.NAVER_CLIENT_SECRET ?? '',
-    // 네이버 개발자 콘솔에 등록하는 백엔드 콜백 URL
-    redirectUri:
-      process.env.NAVER_REDIRECT_URI ?? 'http://localhost:8080/api/auth/naver/callback',
   },
   db: {
     url: process.env.DATABASE_URL ?? '',

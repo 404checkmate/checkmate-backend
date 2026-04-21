@@ -17,10 +17,6 @@ const envSchema = z.object({
   FRONTEND_AUTH_CALLBACK_URL: z.string().url().optional().or(z.literal('')),
   AUTH_DEV_BYPASS: z.enum(['true', 'false']).default('true'),
 
-  NAVER_CLIENT_ID: z.string().optional().or(z.literal('')),
-  NAVER_CLIENT_SECRET: z.string().optional().or(z.literal('')),
-  NAVER_REDIRECT_URI: z.string().url().optional().or(z.literal('')),
-
   REDIS_HOST: z.string().default('localhost'),
   REDIS_PORT: z.coerce.number().int().positive().default(6379),
   REDIS_PASSWORD: z.string().optional().or(z.literal('')),

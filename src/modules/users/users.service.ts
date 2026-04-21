@@ -6,7 +6,7 @@ import type { AuthProviderName } from '../../common/decorators/current-user.deco
 
 export interface SocialLoginIdentity {
   provider: AuthProviderName;
-  /** 제공자별 고유 식별자. Supabase 경유 시 Supabase UUID(sub), Naver 중개 시 Naver UUID. */
+  /** 제공자별 고유 식별자 (Supabase Auth 의 user `sub` UUID). */
   providerUserId: string;
   email: string | null;
   name?: string;
@@ -123,8 +123,6 @@ export class UsersService {
         return AuthProvider.google;
       case 'kakao':
         return AuthProvider.kakao;
-      case 'naver':
-        return AuthProvider.naver;
     }
   }
 

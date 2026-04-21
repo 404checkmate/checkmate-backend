@@ -7,10 +7,10 @@ import { createParamDecorator, ExecutionContext } from '@nestjs/common';
  *   @Get('me')
  *   getMe(@CurrentUser() user: AuthUser) { ... }
  */
-export type AuthProviderName = 'google' | 'kakao' | 'naver';
+export type AuthProviderName = 'google' | 'kakao';
 
 export interface AuthUser {
-  /** Supabase Auth UUID (sub claim) — Naver 중개 로그인 시에도 동일 스키마 UUID 사용 */
+  /** Supabase Auth UUID (sub claim) */
   supabaseId: string;
   /** DB 내 users.id (Guard 가 JIT 프로비저닝 후 주입) */
   userId: bigint | null;

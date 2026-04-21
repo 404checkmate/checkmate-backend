@@ -3,9 +3,9 @@ import { createHmac, randomUUID, timingSafeEqual } from 'crypto';
 /**
  * Supabase 호환 HS256 JWT 유틸.
  *
- * - 검증: Google/Kakao 는 Supabase 가 발급한 토큰, Naver 는 우리 백엔드가 발급한 토큰을 동일하게 검증.
- * - 서명: Naver OAuth 중개 플로우에서 Supabase 와 동일 시크릿(`SUPABASE_JWT_SECRET`)으로 같은 스키마의
- *   JWT 를 발급. 프론트/가드 모두 Supabase 세션과 구분 없이 다룸.
+ * - 검증: Google/Kakao 소셜 로그인은 Supabase 가 발급한 토큰을 이 유틸로 검증한다.
+ * - 서명: 현재는 백엔드에서 JWT 를 직접 발급하는 플로우가 없다.
+ *   (향후 커스텀 JWT 발급이 필요해지면 `signSupabaseCompatibleJwt` 를 재사용.)
  */
 
 export interface SupabaseCompatiblePayload {
