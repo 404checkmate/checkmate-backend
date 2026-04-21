@@ -8,12 +8,13 @@
  * - countries (ISO-3166 alpha-2)
  * - cities (주요 취항지)
  * - checklist_categories
+ * - checklist_item_templates (기본 여행 준비물)
  * - travel_styles
  * - companion_types
  *
  * 모든 upsert는 idempotent — 여러 번 실행해도 안전합니다.
  */
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma, PrepType, BaggageType } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -92,15 +93,23 @@ async function seedCities() {
 }
 
 async function seedChecklistCategories() {
+  // 서비스에서 제공하는 기본 체크리스트 섹션(9개) + 기존 카테고리
   const categories = [
-    { code: 'documents', labelKo: '서류', sortOrder: 1 },
-    { code: 'electronics', labelKo: '전자기기', sortOrder: 2 },
-    { code: 'clothing', labelKo: '의류', sortOrder: 3 },
-    { code: 'packing', labelKo: '짐 꾸리기', sortOrder: 4 },
-    { code: 'health', labelKo: '건강/약', sortOrder: 5 },
-    { code: 'activity', labelKo: '액티비티', sortOrder: 6 },
-    { code: 'booking', labelKo: '예약', sortOrder: 7 },
-    { code: 'ai_recommend', labelKo: 'AI 추천', sortOrder: 8 },
+    // 기본 제공 섹션 (sort 1~9)
+    { code: 'essentials', labelKo: '필수 준비물', sortOrder: 1 },
+    { code: 'clothing', labelKo: '입을 옷', sortOrder: 2 },
+    { code: 'health', labelKo: '상비약', sortOrder: 3 },
+    { code: 'toiletries', labelKo: '세면도구', sortOrder: 4 },
+    { code: 'beauty', labelKo: '미용용품', sortOrder: 5 },
+    { code: 'electronics', labelKo: '전자제품', sortOrder: 6 },
+    { code: 'travel_goods', labelKo: '여행용품', sortOrder: 7 },
+    { code: 'booking', labelKo: '사전 예약/신청', sortOrder: 8 },
+    { code: 'pre_departure', labelKo: '출국 전 확인사항', sortOrder: 9 },
+    // 기타
+    { code: 'documents', labelKo: '서류', sortOrder: 90 },
+    { code: 'packing', labelKo: '짐 꾸리기', sortOrder: 91 },
+    { code: 'activity', labelKo: '액티비티', sortOrder: 92 },
+    { code: 'ai_recommend', labelKo: 'AI 추천', sortOrder: 99 },
   ];
   for (const c of categories) {
     await prisma.checklistCategory.upsert({
@@ -110,6 +119,135 @@ async function seedChecklistCategories() {
     });
   }
   console.log(`[seed] checklist_categories: ${categories.length} rows upserted`);
+}
+
+// -------------------------------------------------------
+// 기본 여행 준비물 템플릿
+// -------------------------------------------------------
+// ChecklistItemTemplate 은 countryId=null(=전세계 공통) + conditions={} 로 등록한다.
+// 중복 방지는 (categoryCode, title) 조합으로 판별한다.
+type TemplateSeed = {
+  categoryCode: string;
+  title: string;
+  description?: string;
+  prepType: PrepType;
+  baggageType: BaggageType;
+  isEssential?: boolean;
+};
+
+const DEFAULT_TEMPLATES: TemplateSeed[] = [
+  // 필수 준비물
+  { categoryCode: 'essentials', title: '항공권(e티켓 캡처, 출력본)', prepType: 'item', baggageType: 'none', isEssential: true },
+  { categoryCode: 'essentials', title: '여권, 여권 복사본', prepType: 'item', baggageType: 'carry_on', isEssential: true },
+  { categoryCode: 'essentials', title: '이심 / 유심 / 로밍 / 포켓 와이파이', prepType: 'item', baggageType: 'carry_on', isEssential: true },
+  { categoryCode: 'essentials', title: '해외 결제 카드', prepType: 'item', baggageType: 'carry_on', isEssential: true },
+  { categoryCode: 'essentials', title: '약간의 현금', prepType: 'item', baggageType: 'carry_on', isEssential: true },
+  { categoryCode: 'essentials', title: '볼펜', prepType: 'item', baggageType: 'carry_on' },
+
+  // 입을 옷
+  { categoryCode: 'clothing', title: '여벌옷', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'clothing', title: '잠옷', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'clothing', title: '속옷', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'clothing', title: '양말', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'clothing', title: '편한 신발', prepType: 'item', baggageType: 'none' },
+  { categoryCode: 'clothing', title: '모자', prepType: 'item', baggageType: 'carry_on' },
+  { categoryCode: 'clothing', title: '선글라스', prepType: 'item', baggageType: 'carry_on' },
+
+  // 상비약
+  { categoryCode: 'health', title: '감기약', prepType: 'item', baggageType: 'carry_on' },
+  { categoryCode: 'health', title: '해열진통제', prepType: 'item', baggageType: 'carry_on' },
+  { categoryCode: 'health', title: '지사제', prepType: 'item', baggageType: 'carry_on' },
+  { categoryCode: 'health', title: '소화제', prepType: 'item', baggageType: 'carry_on' },
+  { categoryCode: 'health', title: '연고/소독약', prepType: 'item', baggageType: 'carry_on' },
+  { categoryCode: 'health', title: '알콜스왑', prepType: 'item', baggageType: 'carry_on' },
+  { categoryCode: 'health', title: '밴드', prepType: 'item', baggageType: 'carry_on' },
+
+  // 세면도구
+  { categoryCode: 'toiletries', title: '칫솔, 치약', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'toiletries', title: '세안용품(클렌징폼, 클렌징오일, 립앤아이 리무버)', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'toiletries', title: '샤워용품(샴푸, 린스, 바디워시)', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'toiletries', title: '면봉/화장솜', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'toiletries', title: '면도기/제모기', prepType: 'item', baggageType: 'checked' },
+
+  // 미용용품
+  { categoryCode: 'beauty', title: '스킨케어 (스킨, 로션, 립밤, 핸드크림)', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'beauty', title: '자외선 차단제 (크림, 스틱, 스프레이)', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'beauty', title: '색조 화장품', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'beauty', title: '헤어용품(머리끈, 머리핀, 헤어롤)', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'beauty', title: '헤어제품 (에센스/오일/왁스/스프레이)', prepType: 'item', baggageType: 'checked' },
+
+  // 전자제품
+  { categoryCode: 'electronics', title: '보조배터리', description: '항공사 규정상 반드시 기내 반입', prepType: 'item', baggageType: 'carry_on' },
+  { categoryCode: 'electronics', title: '충전기 (용도에 따라)', prepType: 'item', baggageType: 'carry_on' },
+  { categoryCode: 'electronics', title: '해외 멀티 어댑터', prepType: 'item', baggageType: 'carry_on' },
+  { categoryCode: 'electronics', title: '이어폰', prepType: 'item', baggageType: 'carry_on' },
+
+  // 여행용품
+  { categoryCode: 'travel_goods', title: '휴대용 휴지, 물티슈', prepType: 'item', baggageType: 'carry_on' },
+  { categoryCode: 'travel_goods', title: '양우산', prepType: 'item', baggageType: 'carry_on' },
+  { categoryCode: 'travel_goods', title: '보조 가방', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'travel_goods', title: '일회용 베개커버', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'travel_goods', title: '비닐봉투/지퍼백', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'travel_goods', title: '샤워기헤드/샤워기필터', prepType: 'item', baggageType: 'checked' },
+
+  // 사전 예약/신청
+  { categoryCode: 'booking', title: '항공권 예약', prepType: 'pre_booking', baggageType: 'none', isEssential: true },
+  { categoryCode: 'booking', title: '숙소 예약', prepType: 'pre_booking', baggageType: 'none', isEssential: true },
+  { categoryCode: 'booking', title: '여행자 보험', prepType: 'pre_booking', baggageType: 'none' },
+  { categoryCode: 'booking', title: '환전', prepType: 'pre_booking', baggageType: 'none' },
+  { categoryCode: 'booking', title: '이심/유심/로밍/포켓와이파이 신청', prepType: 'pre_booking', baggageType: 'none' },
+  { categoryCode: 'booking', title: '여행지 공항 픽업/샌딩 서비스 예약', prepType: 'pre_booking', baggageType: 'none' },
+
+  // 출국 전 확인사항
+  { categoryCode: 'pre_departure', title: '여권 만료일 확인(6개월 이상)', prepType: 'pre_departure_check', baggageType: 'none', isEssential: true },
+  { categoryCode: 'pre_departure', title: '온라인 체크인', prepType: 'pre_departure_check', baggageType: 'none' },
+  { categoryCode: 'pre_departure', title: '카운터 오픈/마감 시간 체크', prepType: 'pre_departure_check', baggageType: 'none' },
+  { categoryCode: 'pre_departure', title: '카운터 위치', prepType: 'pre_departure_check', baggageType: 'none' },
+  { categoryCode: 'pre_departure', title: '캐리어 무게 체크', prepType: 'pre_departure_check', baggageType: 'none' },
+  { categoryCode: 'pre_departure', title: '국가별, 항공사별 수하물 규정 확인', prepType: 'pre_departure_check', baggageType: 'none' },
+];
+
+async function seedChecklistItemTemplates() {
+  const categories = await prisma.checklistCategory.findMany();
+  const byCode = new Map(categories.map((c) => [c.code, c]));
+
+  let inserted = 0;
+  let updated = 0;
+  for (const t of DEFAULT_TEMPLATES) {
+    const category = byCode.get(t.categoryCode);
+    if (!category) {
+      console.warn(`[seed] skip template "${t.title}" (unknown category: ${t.categoryCode})`);
+      continue;
+    }
+
+    // ChecklistItemTemplate 에는 unique constraint 가 없으므로
+    // (categoryId, countryId=null, title) 로 수동 idempotent 처리.
+    const existing = await prisma.checklistItemTemplate.findFirst({
+      where: { categoryId: category.id, countryId: null, title: t.title },
+    });
+
+    const data = {
+      categoryId: category.id,
+      countryId: null as bigint | null,
+      title: t.title,
+      description: t.description ?? null,
+      prepType: t.prepType,
+      baggageType: t.baggageType,
+      conditions: {} as Prisma.InputJsonValue,
+      isEssential: t.isEssential ?? false,
+    };
+
+    if (existing) {
+      await prisma.checklistItemTemplate.update({ where: { id: existing.id }, data });
+      updated += 1;
+    } else {
+      await prisma.checklistItemTemplate.create({ data });
+      inserted += 1;
+    }
+  }
+  console.log(
+    `[seed] checklist_item_templates: ${inserted} inserted, ${updated} updated (total ${DEFAULT_TEMPLATES.length})`,
+  );
 }
 
 async function seedTravelStyles() {
@@ -157,6 +295,7 @@ async function main() {
   await seedCountries();
   await seedCities();
   await seedChecklistCategories();
+  await seedChecklistItemTemplates();
   await seedTravelStyles();
   await seedCompanionTypes();
   console.log('[seed] done.');
