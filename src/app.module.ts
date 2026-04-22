@@ -18,6 +18,7 @@ import { TripsModule } from './modules/trips/trips.module';
 import { ChecklistsModule } from './modules/checklists/checklists.module';
 import { LlmModule } from './modules/llm/llm.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
+import { GuideArchivesModule } from './modules/guide-archives/guide-archives.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
     ChecklistsModule,
     LlmModule,
     AnalyticsModule,
+    GuideArchivesModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: SupabaseJwtGuard },

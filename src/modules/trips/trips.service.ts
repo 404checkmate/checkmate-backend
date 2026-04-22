@@ -61,6 +61,9 @@ export class TripsService {
   async create(dto: CreateTripDto): Promise<TripDetail> {
     this.assertDateRange(dto.tripStart, dto.tripEnd);
 
+    if (!dto.userId) {
+      throw new BadRequestException('userId 가 비어있습니다. 인증 상태를 확인하세요.');
+    }
     const userId = BigInt(dto.userId);
     const country = await this.resolveCountry(dto.countryCode);
     const cityRows = await this.resolveCityInputs(dto.cities, country.id);

@@ -105,13 +105,16 @@ export class TripTravelStyleInputDto {
 
 export class CreateTripDto {
   /**
-   * 임시. 인증 연동 이전에는 `userId` 를 바디로 받되,
-   * 추후 `SupabaseJwtGuard` 가 주입하는 `req.user.userId` 로 대체 예정.
+   * 레거시/개발용 fallback.
+   * 기본적으로는 `SupabaseJwtGuard` 가 주입한 `req.user.userId` 가 사용되며,
+   * Controller 에서 이 필드가 있더라도 JWT 값으로 덮어쓴다.
+   * (인증이 꺼진 개발 환경·스크립트에서만 의미 있음)
    */
+  @IsOptional()
   @IsInt()
   @Min(1)
   @Type(() => Number)
-  userId!: number;
+  userId?: number;
 
   /** ISO-3166 alpha-2 (예: 'VN', 'JP') */
   @IsString()

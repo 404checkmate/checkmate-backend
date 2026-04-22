@@ -259,6 +259,7 @@ async function seedTravelStyles() {
     { code: 'nature', labelKo: '자연', iconPath: '/icons/style/nature.svg' },
     { code: 'activity', labelKo: '액티비티', iconPath: '/icons/style/activity.svg' },
     { code: 'culture', labelKo: '문화/예술', iconPath: '/icons/style/culture.svg' },
+    { code: 'photo', labelKo: '포토스팟', iconPath: '/icons/style/photo.svg' },
     { code: 'nightlife', labelKo: '나이트라이프', iconPath: '/icons/style/nightlife.svg' },
   ];
   for (const s of styles) {

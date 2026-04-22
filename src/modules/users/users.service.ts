@@ -32,6 +32,81 @@ export class UsersService {
     return user;
   }
 
+  /**
+   * 온보딩 프로필 수정. 전달된 필드만 업데이트한다.
+   * (Prisma 특성상 undefined 는 no-op, null 은 컬럼을 비우는 의미)
+   *
+   * 추가 동작: 이번 업데이트로 처음 "gender(!=unknown) + birthDate" 가 모두
+   * 채워지는 순간 `onboardingCompletedAt` 을 현재 시각으로 스탬프한다.
+   * 이미 스탬프된 사용자는 건드리지 않는다(멱등).
+   */
+  async updateProfile(
+    id: bigint,
+    patch: {
+      nickname?: string;
+      gender?: import('@prisma/client').Gender;
+      birthDate?: Date;
+      profileImageUrl?: string;
+    },
+  ) {
+    const user = await this.requireById(id);
+    this.logger.log(
+      `updateProfile user=${user.id} keys=${Object.keys(patch).filter((k) => patch[k as keyof typeof patch] !== undefined).join(',')}`,
+    );
+
+    // 업데이트 이후(머지된) 프로필로 온보딩 완료 여부 계산.
+    const mergedGender = patch.gender ?? user.gender;
+    const mergedBirth = patch.birthDate ?? user.birthDate ?? null;
+    const isOnboardingComplete =
+      mergedGender !== 'unknown' && mergedBirth !== null;
+    const shouldStamp =
+      isOnboardingComplete && user.onboardingCompletedAt == null;
+
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        nickname: patch.nickname ?? undefined,
+        gender: patch.gender ?? undefined,
+        birthDate: patch.birthDate ?? undefined,
+        profileImageUrl: patch.profileImageUrl ?? undefined,
+        onboardingCompletedAt: shouldStamp ? new Date() : undefined,
+      },
+    });
+  }
+
+  /**
+   * 약관/개인정보 동의 수락 기록.
+   *
+   * - `legalConsentAcceptedAt` 에 현재 시각 스탬프 (재호출 시 최신 시각으로 덮어씀)
+   * - `marketingOptIn` 은 전달값 그대로(기본 false)
+   *
+   * 재호출을 허용하는 이유: 프론트가 재로그인·재진입 플로우에서 한 번 더
+   * /consent 를 태울 수 있도록 멱등하게 동작해야 하기 때문.
+   */
+  async acceptConsent(
+    id: bigint,
+    input: { marketingOptIn?: boolean },
+  ) {
+    await this.requireById(id);
+    const now = new Date();
+    const marketingOptIn = Boolean(input.marketingOptIn);
+    this.logger.log(
+      `acceptConsent user=${id} marketingOptIn=${marketingOptIn}`,
+    );
+    return this.prisma.user.update({
+      where: { id },
+      data: {
+        legalConsentAcceptedAt: now,
+        marketingOptIn,
+      },
+      select: {
+        id: true,
+        legalConsentAcceptedAt: true,
+        marketingOptIn: true,
+      },
+    });
+  }
+
   findByEmail(email: string) {
     return this.prisma.user.findFirst({ where: { email, deletedAt: null } });
   }
