@@ -1,10 +1,12 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, Logger } from '@nestjs/common';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { UsersService } from '../users/users.service';
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(private readonly users: UsersService) {}
 
   @Public()
@@ -20,6 +22,9 @@ export class AuthController {
    */
   @Get('me')
   async me(@CurrentUser() user: AuthUser | undefined) {
+    this.logger.log(
+      `[auth/me] supabaseId=${user?.supabaseId ?? '(null)'} userId=${user?.userId ?? '(null)'} provider=${user?.provider ?? '(none)'}`,
+    );
     if (!user) return { user: null };
     if (user.userId == null) {
       // dev-anon 또는 JIT 실패 케이스 — 프론트는 onboarding 유도.

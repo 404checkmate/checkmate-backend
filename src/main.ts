@@ -24,9 +24,33 @@ async function bootstrap() {
 
   app.setGlobalPrefix(apiPrefix);
   app.use(helmet());
+
+  // CORS: 프론트는 Bearer 토큰 방식이므로 쿠키를 동반하지 않는다.
+  // `credentials: true` + `origin: '*'` 조합은 브라우저가 즉시 차단하므로,
+  // 와일드카드일 때는 credentials 를 꺼서 "조용히 실패" 를 방지한다.
+  const origins = corsOrigin
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+  const isWildcard = origins.length === 0 || origins.includes('*');
+  const allowCredentials = !isWildcard;
+
+  Logger.log(
+    `CORS origin=${isWildcard ? '*' : origins.join(', ')} credentials=${allowCredentials}`,
+    'Bootstrap',
+  );
+  if (isWildcard && process.env.NODE_ENV === 'production') {
+    Logger.warn(
+      'CORS_ORIGIN=* 는 운영 환경에서 권장되지 않습니다. 실 도메인만 허용하세요.',
+      'Bootstrap',
+    );
+  }
+
   app.enableCors({
-    origin: corsOrigin.split(',').map((o) => o.trim()),
-    credentials: true,
+    origin: isWildcard ? true : origins,
+    credentials: allowCredentials,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'Accept', 'X-Requested-With'],
   });
 
   app.useGlobalPipes(
