@@ -52,7 +52,7 @@ export class OpenaiService {
         'LLM_API_KEY 가 설정되지 않았습니다. .env 에 OpenAI API Key 를 넣어주세요.',
       );
     }
-    this.client = new OpenAI({ apiKey });
+    this.client = new OpenAI({ apiKey, timeout: 15_000 });
     return this.client;
   }
 

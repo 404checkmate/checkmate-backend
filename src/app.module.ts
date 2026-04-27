@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 
 import configuration from './config/configuration';
 import { validateEnv } from './config/validation';
@@ -28,6 +29,9 @@ import { GuideArchivesModule } from './modules/guide-archives/guide-archives.mod
       load: [configuration],
       validate: validateEnv,
     }),
+    ThrottlerModule.forRoot([
+      { name: 'default', ttl: 60_000, limit: 60 },
+    ]),
     PrismaModule,
     SupabaseModule,
 
@@ -42,6 +46,7 @@ import { GuideArchivesModule } from './modules/guide-archives/guide-archives.mod
   ],
   providers: [
     { provide: APP_GUARD, useClass: SupabaseJwtGuard },
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
     { provide: APP_INTERCEPTOR, useClass: LoggingInterceptor },
   ],
 })

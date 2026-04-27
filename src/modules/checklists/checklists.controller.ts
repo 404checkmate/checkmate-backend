@@ -12,6 +12,7 @@ import {
   Post,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   AuthUser,
   CurrentUser,
@@ -57,6 +58,7 @@ export class ChecklistsController {
    */
   @Post('generate/:tripId')
   @HttpCode(200)
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   generate(@Param('tripId', ParseIntPipe) tripId: number) {
     return this.checklists.generateForTrip(BigInt(tripId));
   }
@@ -71,6 +73,7 @@ export class ChecklistsController {
    */
   @Post('generate-from-context')
   @HttpCode(200)
+  @Throttle({ default: { ttl: 60_000, limit: 5 } })
   generateFromContext(@Body() dto: GenerateFromContextDto) {
     const season = dto.season?.trim()
       ? dto.season
