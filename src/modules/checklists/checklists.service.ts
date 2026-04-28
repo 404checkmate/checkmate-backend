@@ -170,20 +170,18 @@ export class ChecklistsService {
       this.logger.warn(
         `[generateForTrip] persist failed (trip=${tripId}) — 이미 다른 요청이 persist 했을 가능성: ${err.message}`,
       );
+      throw e;
     }
 
     // persist 후 DB 에서 다시 읽어 id/isSelected 가 채워진 응답을 돌려준다.
+    // upsert 로 행이 보장되므로 reloaded 는 항상 non-null.
     const reloaded = await this.loadPersistedChecklistItems(tripId);
-    if (reloaded) {
-      return this.buildResponseFromPersisted(
-        trip,
-        tripId.toString(),
-        reloaded.items,
-        reloaded.generatedBy,
-      );
-    }
-    // persist 가 완전히 실패한 극단적 경우 — 메모리 결과라도 돌려준다 (후속 호출 시 재시도).
-    return built;
+    return this.buildResponseFromPersisted(
+      trip,
+      tripId.toString(),
+      reloaded!.items,
+      reloaded!.generatedBy,
+    );
   }
 
   /**
