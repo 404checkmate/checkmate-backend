@@ -149,7 +149,7 @@ export class ChecklistsService {
     const trip = await this.loadTripForContext(tripId);
 
     const cached = await this.loadPersistedChecklistItems(tripId);
-    if (cached) {
+    if (cached && cached.items.length > 0) {
       this.logger.log(`[generateForTrip] cache hit trip=${tripId} items=${cached.items.length}`);
       return this.buildResponseFromPersisted(
         trip,
@@ -698,61 +698,70 @@ export class ChecklistsService {
 
   /**
    * 메모리 상의 generated 결과를 DB 에 영속화.
-   * 이미 존재하는 Checklist 가 있으면 아무 것도 하지 않는다 (멱등).
+   * - Checklist 행이 없으면 생성, 있으면 재사용.
+   * - 아이템 저장은 항상 실행 (기존 활성 아이템 타이틀 기준 중복 제거 후 INSERT).
    */
   private async persistChecklist(
     tripId: bigint,
     generated: GeneratedChecklist,
   ): Promise<void> {
-    const existing = await this.prisma.checklist.findUnique({ where: { tripId } });
-    if (existing) {
-      return;
-    }
-
-    const generatedBy = this.inferGeneratedBy(generated);
-
     await this.prisma.$transaction(async (tx) => {
-      const checklist = await tx.checklist.create({
-        data: {
-          tripId,
-          generatedBy,
-          status: 'not_started',
-        },
+      // Checklist 행 보장 — 없을 때만 생성.
+      // upsert 로 원자적 create-or-reuse — 동시 요청 시 UNIQUE 제약 위반 방지.
+      const generatedBy = this.inferGeneratedBy(generated);
+      const checklist = await tx.checklist.upsert({
+        where: { tripId },
+        create: { tripId, generatedBy, status: 'not_started' },
+        update: {},
       });
 
       if (generated.items.length > 0) {
-        // ChecklistItem 에 저장할 카테고리 id 해소.
-        const categoryCodes = Array.from(new Set(generated.items.map((i) => i.categoryCode)));
-        const categories = await tx.checklistCategory.findMany({
-          where: { code: { in: categoryCodes } },
+        // 기존 활성 아이템 타이틀로 중복 삽입 방지.
+        const existingItems = await tx.checklistItem.findMany({
+          where: { checklistId: checklist.id, deletedAt: null },
+          select: { title: true },
         });
-        const categoryIdByCode = new Map(categories.map((c) => [c.code, c.id]));
-        // 안전망: 미등록 카테고리 코드는 'ai_recommend' 로 fallback.
-        const fallback = categories.find((c) => c.code === 'ai_recommend');
+        const existingTitles = new Set(
+          existingItems.map((e) => this.normalizeTitle(e.title)),
+        );
+        const newItems = generated.items.filter(
+          (it) => !existingTitles.has(this.normalizeTitle(it.title)),
+        );
 
-        await tx.checklistItem.createMany({
-          data: generated.items.map((it) => {
-            const categoryId =
-              categoryIdByCode.get(it.categoryCode) ?? fallback?.id ?? categories[0]?.id;
-            if (!categoryId) {
-              throw new Error('[persistChecklist] seed 된 ChecklistCategory 가 하나도 없습니다.');
-            }
-            return {
-              checklistId: checklist.id,
-              categoryId,
-              title: it.title,
-              description: it.description ?? null,
-              prepType: it.prepType,
-              baggageType: it.baggageType,
-              source: (it.source === 'template'
-                ? ChecklistItemSource.template
-                : ChecklistItemSource.llm) as ChecklistItemSource,
-              orderIndex: it.orderIndex,
-              isSelected: false,
-              selectedAt: null,
-            };
-          }),
-        });
+        if (newItems.length > 0) {
+          // ChecklistItem 에 저장할 카테고리 id 해소.
+          const categoryCodes = Array.from(new Set(newItems.map((i) => i.categoryCode)));
+          const categories = await tx.checklistCategory.findMany({
+            where: { code: { in: categoryCodes } },
+          });
+          const categoryIdByCode = new Map(categories.map((c) => [c.code, c.id]));
+          // 안전망: 미등록 카테고리 코드는 'ai_recommend' 로 fallback.
+          const fallback = categories.find((c) => c.code === 'ai_recommend');
+
+          await tx.checklistItem.createMany({
+            data: newItems.map((it) => {
+              const categoryId =
+                categoryIdByCode.get(it.categoryCode) ?? fallback?.id ?? categories[0]?.id;
+              if (!categoryId) {
+                throw new Error('[persistChecklist] seed 된 ChecklistCategory 가 하나도 없습니다.');
+              }
+              return {
+                checklistId: checklist!.id,
+                categoryId,
+                title: it.title,
+                description: it.description ?? null,
+                prepType: it.prepType,
+                baggageType: it.baggageType,
+                source: (it.source === 'template'
+                  ? ChecklistItemSource.template
+                  : ChecklistItemSource.llm) as ChecklistItemSource,
+                orderIndex: it.orderIndex,
+                isSelected: false,
+                selectedAt: null,
+              };
+            }),
+          });
+        }
       }
 
       // LLM 호출 이력 기록 — 후속 "같은 trip 에 다시 돌리지 말 것" 판단에도 쓸 수 있다.
@@ -888,7 +897,7 @@ export class ChecklistsService {
         },
       },
     });
-    if (!checklist || checklist.items.length === 0) return null;
+    if (!checklist) return null;
     return { items: checklist.items, generatedBy: checklist.generatedBy };
   }
 
