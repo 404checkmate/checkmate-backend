@@ -406,11 +406,12 @@ model ChecklistItemTemplate {
 }
 
 model GuideArchive {
-  id          BigInt   @id @default(autoincrement())
-  checklistId BigInt   @map("checklist_id")
-  name        String
-  snapshot    Json // 저장 시점의 items 스냅샷
-  archivedAt  DateTime @default(now()) @map("archived_at")
+  id              BigInt   @id @default(autoincrement())
+  checklistId     BigInt   @map("checklist_id")
+  name            String
+  snapshot        Json // 저장 시점의 items 스냅샷
+  archivedAt      DateTime @default(now()) @map("archived_at")
+  isAiRecommended Boolean  @default(false) @map("is_ai_recommended")
 
   checklist Checklist @relation(fields: [checklistId], references: [id], onDelete: Cascade)
 
