@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   BaggageType,
   CheckAction,
@@ -26,6 +26,7 @@ export interface GeneratedChecklistItem {
   id: string | null;
   title: string;
   description?: string;
+  memo?: string;
   categoryCode: string;
   categoryLabel: string;
   prepType: 'item' | 'pre_booking' | 'pre_departure_check' | 'ai_recommend';
@@ -427,15 +428,18 @@ export class ChecklistsService {
 
     const patchedTitle = patch.title ?? item.title;
     const patchedDesc = patch.description !== undefined ? patch.description : item.description;
+    const patchedMemo = patch.memo !== undefined ? patch.memo : item.memo;
     const patchedOrder = patch.orderIndex ?? item.orderIndex;
 
     const titleChanged = patch.title !== undefined && patch.title !== item.title;
     const descChanged =
       patch.description !== undefined && (patch.description ?? null) !== (item.description ?? null);
+    const memoChanged =
+      patch.memo !== undefined && (patch.memo ?? null) !== (item.memo ?? null);
     const orderChanged =
       patch.orderIndex !== undefined && patch.orderIndex !== item.orderIndex;
 
-    if (!titleChanged && !descChanged && !orderChanged) {
+    if (!titleChanged && !descChanged && !memoChanged && !orderChanged) {
       // no-op — 현재 상태 그대로 돌려준다.
       return {
         ok: true as const,
@@ -448,11 +452,13 @@ export class ChecklistsService {
     const before = {
       title: item.title,
       description: item.description,
+      memo: item.memo,
       orderIndex: item.orderIndex,
     };
     const after = {
       title: patchedTitle,
       description: patchedDesc ?? null,
+      memo: patchedMemo ?? null,
       orderIndex: patchedOrder,
     };
 
@@ -471,6 +477,7 @@ export class ChecklistsService {
         data: {
           title: patchedTitle,
           description: patchedDesc ?? null,
+          memo: patchedMemo ?? null,
           orderIndex: patchedOrder,
         },
       });
@@ -486,7 +493,7 @@ export class ChecklistsService {
           itemId,
           userId,
           editType:
-            !titleChanged && !descChanged && orderChanged
+            !titleChanged && !descChanged && !memoChanged && orderChanged
               ? EditType.reorder
               : EditType.text,
           beforeValue: before as Prisma.InputJsonValue,
@@ -501,7 +508,7 @@ export class ChecklistsService {
     });
 
     this.logger.log(
-      `[editItem] item=${itemId} user=${userId} titleChanged=${titleChanged} descChanged=${descChanged} orderChanged=${orderChanged}`,
+      `[editItem] item=${itemId} user=${userId} titleChanged=${titleChanged} descChanged=${descChanged} memoChanged=${memoChanged} orderChanged=${orderChanged}`,
     );
 
     return {
@@ -521,8 +528,16 @@ export class ChecklistsService {
   async deleteItem(itemId: bigint, userId: bigint) {
     const item = await this.prisma.checklistItem.findFirst({
       where: { id: itemId, deletedAt: null },
+      include: {
+        checklist: {
+          include: { trip: { select: { userId: true } } },
+        },
+      },
     });
-    if (!item) throw new NotFoundException(`ChecklistItem ${itemId} not found`);
+    if (!item) throw new NotFoundException('항목을 찾을 수 없습니다.');
+    if (item.checklist.trip.userId !== userId) {
+      throw new ForbiddenException('삭제 권한이 없습니다.');
+    }
 
     const now = new Date();
     await this.prisma.$transaction([
@@ -550,6 +565,7 @@ export class ChecklistsService {
       ok: true as const,
       itemId: itemId.toString(),
       deletedAt: now.toISOString(),
+      message: '항목이 삭제되었습니다.',
     };
   }
 
@@ -619,6 +635,7 @@ export class ChecklistsService {
       id: it.id.toString(),
       title: it.title,
       description: it.description ?? undefined,
+      memo: it.memo ?? undefined,
       categoryCode: it.category.code,
       categoryLabel: it.category.labelKo,
       prepType: it.prepType as GeneratedChecklistItem['prepType'],
@@ -831,6 +848,7 @@ export class ChecklistsService {
       id: it.id.toString(),
       title: it.title,
       description: it.description ?? undefined,
+      memo: it.memo ?? undefined,
       categoryCode: it.category.code,
       categoryLabel: it.category.labelKo,
       prepType: it.prepType as GeneratedChecklistItem['prepType'],

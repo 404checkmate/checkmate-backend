@@ -63,6 +63,11 @@ export class EditItemDto {
   description?: string;
 
   @IsOptional()
+  @IsString()
+  @Length(0, 1000)
+  memo?: string;
+
+  @IsOptional()
   @IsInt()
   @Min(0)
   orderIndex?: number;
