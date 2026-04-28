@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ChecklistGeneratedBy, Prisma } from '@prisma/client';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 
@@ -34,7 +34,7 @@ export class GuideArchivesService {
     };
   }
 
-  async createForTrip(tripId: bigint, input: { name?: string; snapshot?: unknown }) {
+  async createForTrip(tripId: bigint, input: { name?: string; snapshot?: unknown; isAiRecommended?: boolean }) {
     const trip = await this.prisma.trip.findFirst({
       where: { id: tripId, deletedAt: null },
       select: { id: true },
@@ -65,6 +65,7 @@ export class GuideArchivesService {
         checklistId: checklist.id,
         name,
         snapshot,
+        isAiRecommended: input.isAiRecommended ?? false,
       },
     });
 
@@ -95,16 +96,28 @@ export class GuideArchivesService {
     return this.serialize(updated);
   }
 
-  async remove(archiveId: bigint) {
+  async remove(archiveId: bigint, userId: bigint) {
     const existing = await this.prisma.guideArchive.findUnique({
       where: { id: archiveId },
+      include: {
+        checklist: {
+          include: { trip: { select: { userId: true } } },
+        },
+      },
     });
-    if (!existing) throw new NotFoundException(`archive ${archiveId} not found`);
+    if (!existing) throw new NotFoundException('아카이브를 찾을 수 없습니다.');
+    if (existing.checklist.trip.userId !== userId) {
+      throw new ForbiddenException('삭제 권한이 없습니다.');
+    }
 
     await this.prisma.guideArchive.delete({ where: { id: archiveId } });
     this.logger.log(`archive deleted id=${archiveId}`);
 
-    return { ok: true as const, id: archiveId.toString() };
+    return {
+      ok: true as const,
+      id: archiveId.toString(),
+      message: '아카이브가 삭제되었습니다.',
+    };
   }
 
   private serialize(a: {
@@ -113,6 +126,7 @@ export class GuideArchivesService {
     name: string;
     snapshot: Prisma.JsonValue;
     archivedAt: Date;
+    isAiRecommended: boolean;
   }) {
     return {
       id: a.id.toString(),
@@ -122,6 +136,7 @@ export class GuideArchivesService {
       archivedAt: a.archivedAt.toISOString(),
       // 클라이언트 호환 필드 — 스텁 버전에서 `updatedAt` 도 돌려줬기 때문에 유지.
       updatedAt: a.archivedAt.toISOString(),
+      isAiRecommended: a.isAiRecommended,
     };
   }
 }

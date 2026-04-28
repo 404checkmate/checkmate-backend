@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -9,7 +10,10 @@ import {
   ParseIntPipe,
   Patch,
   Post,
+  UnauthorizedException,
 } from '@nestjs/common';
+import { AuthUser, CurrentUser } from '../../common/decorators/current-user.decorator';
+import { CreateGuideArchiveDto } from './dto/create-guide-archive.dto';
 import { GuideArchivesService } from './guide-archives.service';
 
 /**
@@ -33,7 +37,7 @@ export class GuideArchivesController {
   @HttpCode(201)
   create(
     @Param('tripId', ParseIntPipe) tripId: number,
-    @Body() body: { name?: string; snapshot?: unknown },
+    @Body() body: CreateGuideArchiveDto,
   ) {
     return this.archives.createForTrip(BigInt(tripId), body ?? {});
   }
@@ -48,7 +52,19 @@ export class GuideArchivesController {
 
   @Delete('guide-archives/:archiveId')
   @HttpCode(200)
-  remove(@Param('archiveId', ParseIntPipe) archiveId: number) {
-    return this.archives.remove(BigInt(archiveId));
+  remove(
+    @CurrentUser() user: AuthUser | undefined,
+    @Param('archiveId', ParseIntPipe) archiveId: number,
+  ) {
+    const userId = this.requireUserId(user);
+    return this.archives.remove(BigInt(archiveId), userId);
+  }
+
+  private requireUserId(user: AuthUser | undefined): bigint {
+    if (!user) throw new UnauthorizedException('No session');
+    if (user.userId == null) {
+      throw new BadRequestException('JIT 프로비저닝이 아직 안 된 세션입니다.');
+    }
+    return user.userId;
   }
 }
