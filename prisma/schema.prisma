@@ -353,6 +353,7 @@ model ChecklistItem {
   title       String
   description String?
   detail      String?
+  memo        String?   @map("memo")
   prepType    PrepType            @map("prep_type")
   baggageType BaggageType         @map("baggage_type")
   source      ChecklistItemSource
