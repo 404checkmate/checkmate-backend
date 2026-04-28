@@ -31,6 +31,22 @@ export class ChecklistsController {
 
   constructor(private readonly checklists: ChecklistsService) {}
 
+  /**
+   * "내 체크리스트" 조회 — isSelected=true 인 아이템만 포함된 GeneratedChecklist 반환.
+   * 후보 풀 전체(미선택 포함)가 필요하면 GET /api/checklists/by-trip/:tripId/candidates 를 사용.
+   *
+   * 응답 형태: GeneratedChecklist
+   *   {
+   *     tripId: string,
+   *     context: TripContext,
+   *     summary: { total, fromTemplate, fromLlm, ... },
+   *     sections: [{ categoryCode, categoryLabel, items: GeneratedChecklistItem[] }],
+   *     items: GeneratedChecklistItem[]   // isSelected 는 항상 true
+   *   }
+   *
+   * 체크리스트가 아직 생성되지 않은 경우 404 반환.
+   * 먼저 POST /api/checklists/generate/:tripId 를 호출해야 한다.
+   */
   @Get('by-trip/:tripId')
   byTrip(@Param('tripId', ParseIntPipe) tripId: number) {
     return this.checklists.getByTrip(BigInt(tripId));

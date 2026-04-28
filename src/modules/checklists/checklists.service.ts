@@ -94,28 +94,38 @@ export class ChecklistsService {
   // =========================================================
 
   /**
-   * @deprecated 내부 로딩용으로만 유지. 프론트에는 `GeneratedChecklist` 형태로 내려보내는
-   * `generateForTrip` / `listCandidatesForTrip` 를 쓴다.
+   * "내 체크리스트" 조회 — isSelected=true 인 아이템만 GeneratedChecklist 형태로 반환.
+   * 후보 풀 전체(미선택 포함)가 필요하면 listCandidatesForTrip 를 사용.
    */
-  async getByTrip(tripId: bigint) {
+  async getByTrip(tripId: bigint): Promise<GeneratedChecklist> {
+    const trip = await this.loadTripForContext(tripId);
     const checklist = await this.prisma.checklist.findUnique({
       where: { tripId },
       include: {
         items: {
-          where: { deletedAt: null },
+          where: { isSelected: true, deletedAt: null },
           orderBy: { orderIndex: 'asc' },
           include: { category: true },
         },
       },
     });
     if (!checklist) throw new NotFoundException(`Checklist for trip ${tripId} not found`);
-    return checklist;
+    return this.buildResponseFromPersisted(
+      trip,
+      tripId.toString(),
+      checklist.items,
+      checklist.generatedBy,
+    );
   }
 
   /**
-   * Trip 에 영속화된 후보 풀을 `GeneratedChecklist` 형태로 돌려준다.
-   * 없으면 생성해서 DB 에 persist 한 뒤 돌려주는 `generateForTrip` 과 달리,
-   * 이 메서드는 "반드시 존재" 를 기대한다 (없으면 404).
+   * Trip 에 영속화된 후보 풀 전체를 `GeneratedChecklist` 형태로 돌려준다.
+   * `generateForTrip` 과 달리 자동 생성하지 않으므로, 먼저 POST /generate/:tripId 를 호출해야 한다.
+   *
+   * 케이스별 응답:
+   *   - Checklist 행 자체가 없음          → 404 NotFoundException
+   *   - 행은 있고 활성 아이템 없음(0개)   → 200 + { items: [], sections: [] }
+   *   - 행 있고 아이템 있음               → 200 + 전체 후보 풀 (isSelected 무관)
    */
   async listCandidatesForTrip(tripId: bigint): Promise<GeneratedChecklist> {
     const trip = await this.loadTripForContext(tripId);
