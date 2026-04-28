@@ -5,16 +5,37 @@ import { PrismaService } from '../../infra/prisma/prisma.service';
 export class MasterService {
   constructor(private readonly prisma: PrismaService) {}
 
-  listCountries() {
-    return this.prisma.country.findMany({ orderBy: { nameKo: 'asc' } });
+  listCountries(q?: string) {
+    return this.prisma.country.findMany({
+      where: q
+        ? {
+            OR: [
+              { nameKo: { contains: q, mode: 'insensitive' } },
+              { nameEn: { contains: q, mode: 'insensitive' } },
+            ],
+          }
+        : undefined,
+      orderBy: { nameKo: 'asc' },
+    });
   }
 
-  listCities(countryId?: bigint, onlyServed = false) {
+  listCities(params: { q?: string; countryId?: string; onlyServed?: string }) {
+    const { q, countryId, onlyServed } = params;
     return this.prisma.city.findMany({
       where: {
-        ...(countryId ? { countryId } : {}),
-        ...(onlyServed ? { isServed: true } : {}),
+        ...(countryId ? { countryId: BigInt(countryId) } : {}),
+        ...(onlyServed === 'true' ? { isServed: true } : {}),
+        ...(q
+          ? {
+              OR: [
+                { nameKo: { contains: q, mode: 'insensitive' } },
+                { nameEn: { contains: q, mode: 'insensitive' } },
+                { iataCode: { contains: q, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
       },
+      include: { country: true },
       orderBy: { nameKo: 'asc' },
     });
   }

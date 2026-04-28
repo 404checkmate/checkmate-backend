@@ -8,16 +8,17 @@ export class MasterController {
   constructor(private readonly master: MasterService) {}
 
   @Get('countries')
-  countries() {
-    return this.master.listCountries();
+  countries(@Query('q') q?: string) {
+    return this.master.listCountries(q);
   }
 
   @Get('cities')
-  cities(@Query('countryId') countryId?: string, @Query('onlyServed') onlyServed?: string) {
-    return this.master.listCities(
-      countryId ? BigInt(countryId) : undefined,
-      onlyServed === 'true',
-    );
+  cities(
+    @Query('q') q?: string,
+    @Query('countryId') countryId?: string,
+    @Query('onlyServed') onlyServed?: string,
+  ) {
+    return this.master.listCities({ q, countryId, onlyServed });
   }
 
   @Get('checklist-categories')
