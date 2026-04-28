@@ -4,6 +4,7 @@ import {
   IsArray,
   IsDateString,
   IsEnum,
+  IsISO8601,
   IsOptional,
   IsString,
   Length,
@@ -79,4 +80,8 @@ export class UpdateTripDto {
   @ValidateNested({ each: true })
   @Type(() => TripTravelStyleInputDto)
   travelStyles?: TripTravelStyleInputDto[];
+
+  @IsOptional()
+  @IsISO8601()
+  clientUpdatedAt?: string;
 }

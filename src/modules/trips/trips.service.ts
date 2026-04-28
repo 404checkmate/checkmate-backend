@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   Logger,
   NotFoundException,
@@ -156,8 +157,15 @@ export class TripsService {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.trip.update({
-        where: { id: tripId },
+      const where: Prisma.TripWhereInput = {
+        id: tripId,
+        deletedAt: null,
+        ...(dto.clientUpdatedAt && {
+          updatedAt: new Date(dto.clientUpdatedAt),
+        }),
+      };
+      const result = await tx.trip.updateMany({
+        where,
         data: {
           title: dto.title ?? undefined,
           countryId: country?.id ?? undefined,
@@ -167,6 +175,11 @@ export class TripsService {
           status: dto.status ?? undefined,
         },
       });
+      if (result.count === 0) {
+        throw new ConflictException(
+          '다른 사용자가 이미 수정했습니다. 최신 데이터를 다시 조회하세요.',
+        );
+      }
 
       if (cityRows) {
         await tx.tripCity.deleteMany({ where: { tripId } });
