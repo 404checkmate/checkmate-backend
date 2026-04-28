@@ -34,6 +34,45 @@ export class GuideArchivesService {
     };
   }
 
+  async listMine(userId: bigint) {
+    const archives = await this.prisma.guideArchive.findMany({
+      where: {
+        checklist: {
+          trip: { userId, deletedAt: null },
+        },
+      },
+      include: {
+        checklist: {
+          include: {
+            trip: {
+              select: {
+                id: true,
+                title: true,
+                tripStart: true,
+                tripEnd: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { archivedAt: 'desc' },
+    });
+
+    return archives.map((a) => ({
+      id: a.id.toString(),
+      name: a.name,
+      snapshot: a.snapshot,
+      archivedAt: a.archivedAt.toISOString(),
+      isAiRecommended: a.isAiRecommended,
+      trip: {
+        id: a.checklist.trip.id.toString(),
+        title: a.checklist.trip.title,
+        tripStart: a.checklist.trip.tripStart,
+        tripEnd: a.checklist.trip.tripEnd,
+      },
+    }));
+  }
+
   async createForTrip(tripId: bigint, input: { name?: string; snapshot?: unknown; isAiRecommended?: boolean }) {
     const trip = await this.prisma.trip.findFirst({
       where: { id: tripId, deletedAt: null },

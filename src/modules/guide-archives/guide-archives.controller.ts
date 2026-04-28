@@ -28,6 +28,12 @@ export class GuideArchivesController {
 
   constructor(private readonly archives: GuideArchivesService) {}
 
+  @Get('guide-archives/mine')
+  mine(@CurrentUser() user: AuthUser | undefined) {
+    const userId = this.requireUserId(user);
+    return this.archives.listMine(userId);
+  }
+
   @Get('trips/:tripId/guide-archives')
   list(@Param('tripId', ParseIntPipe) tripId: number) {
     return this.archives.listByTrip(BigInt(tripId));
