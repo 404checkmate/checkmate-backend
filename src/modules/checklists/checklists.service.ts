@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ConflictException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import {
   BaggageType,
   CheckAction,
@@ -456,17 +456,32 @@ export class ChecklistsService {
       orderIndex: patchedOrder,
     };
 
-    const [updated] = await this.prisma.$transaction([
-      this.prisma.checklistItem.update({
-        where: { id: itemId },
+    const updated = await this.prisma.$transaction(async (tx) => {
+      // clientUpdatedAt 이 있으면 낙관적 락 적용 — updatedAt 불일치 시 충돌로 간주.
+      const where: Prisma.ChecklistItemWhereInput = {
+        id: itemId,
+        deletedAt: null,
+        ...(patch.clientUpdatedAt && {
+          updatedAt: new Date(patch.clientUpdatedAt),
+        }),
+      };
+
+      const result = await tx.checklistItem.updateMany({
+        where,
         data: {
           title: patchedTitle,
           description: patchedDesc ?? null,
           orderIndex: patchedOrder,
         },
-        include: { category: true },
-      }),
-      this.prisma.checklistItemEdit.create({
+      });
+
+      if (result.count === 0) {
+        throw new ConflictException(
+          '다른 사용자가 이미 수정했습니다. 최신 데이터를 다시 조회하세요.',
+        );
+      }
+
+      await tx.checklistItemEdit.create({
         data: {
           itemId,
           userId,
@@ -477,8 +492,13 @@ export class ChecklistsService {
           beforeValue: before as Prisma.InputJsonValue,
           afterValue: after as Prisma.InputJsonValue,
         },
-      }),
-    ]);
+      });
+
+      return tx.checklistItem.findFirst({
+        where: { id: itemId },
+        include: { category: true },
+      });
+    });
 
     this.logger.log(
       `[editItem] item=${itemId} user=${userId} titleChanged=${titleChanged} descChanged=${descChanged} orderChanged=${orderChanged}`,
@@ -486,9 +506,9 @@ export class ChecklistsService {
 
     return {
       ok: true as const,
-      itemId: updated.id.toString(),
+      itemId: itemId.toString(),
       changed: true,
-      item: this.serializeItem(updated),
+      item: this.serializeItem(updated!),
     };
   }
 

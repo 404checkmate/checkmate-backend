@@ -4,6 +4,7 @@ import {
   IsArray,
   IsIn,
   IsInt,
+  IsISO8601,
   IsOptional,
   IsString,
   Length,
@@ -65,6 +66,10 @@ export class EditItemDto {
   @IsInt()
   @Min(0)
   orderIndex?: number;
+
+  @IsOptional()
+  @IsISO8601()
+  clientUpdatedAt?: string;
 }
 
 export class CheckItemDto {
