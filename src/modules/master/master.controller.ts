@@ -21,6 +21,11 @@ export class MasterController {
     return this.master.listCities({ q, countryId, onlyServed });
   }
 
+  @Get('cities/served')
+  servedCities(@Query('q') q?: string) {
+    return this.master.listServedCities(q);
+  }
+
   @Get('checklist-categories')
   categories() {
     return this.master.listChecklistCategories();

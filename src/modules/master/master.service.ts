@@ -40,6 +40,26 @@ export class MasterService {
     });
   }
 
+  listServedCities(q?: string) {
+    return this.prisma.city.findMany({
+      where: {
+        isServed: true,
+        ...(q
+          ? {
+              OR: [
+                { nameKo: { contains: q, mode: 'insensitive' } },
+                { nameEn: { contains: q, mode: 'insensitive' } },
+                { iataCode: { contains: q, mode: 'insensitive' } },
+              ],
+            }
+          : {}),
+      },
+      include: { country: true },
+      orderBy: { nameKo: 'asc' },
+      take: 10,
+    });
+  }
+
   listChecklistCategories() {
     return this.prisma.checklistCategory.findMany({ orderBy: { sortOrder: 'asc' } });
   }
