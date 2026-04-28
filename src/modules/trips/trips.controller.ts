@@ -71,7 +71,19 @@ export class TripsController {
 
   @Delete(':id')
   @HttpCode(200)
-  remove(@Param('id', ParseIntPipe) id: number) {
-    return this.trips.softDelete(BigInt(id));
+  remove(
+    @CurrentUser() user: AuthUser | undefined,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const userId = this.requireUserId(user);
+    return this.trips.softDelete(BigInt(id), userId);
+  }
+
+  private requireUserId(user: AuthUser | undefined): bigint {
+    if (!user) throw new UnauthorizedException('No session');
+    if (user.userId == null) {
+      throw new BadRequestException('JIT 프로비저닝이 아직 안 된 세션입니다.');
+    }
+    return user.userId;
   }
 }

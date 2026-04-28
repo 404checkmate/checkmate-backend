@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -238,16 +239,26 @@ export class TripsService {
   // =========================
   // DELETE (soft)
   // =========================
-  async softDelete(tripId: bigint): Promise<{ id: string; deletedAt: Date }> {
+  async softDelete(
+    tripId: bigint,
+    userId: bigint,
+  ): Promise<{ id: string; deletedAt: Date; message: string }> {
     const trip = await this.prisma.trip.findFirst({
       where: { id: tripId, deletedAt: null },
     });
-    if (!trip) throw new NotFoundException(`Trip ${tripId} not found`);
+    if (!trip) throw new NotFoundException('여행을 찾을 수 없습니다.');
+    if (trip.userId !== userId) {
+      throw new ForbiddenException('삭제 권한이 없습니다.');
+    }
     const updated = await this.prisma.trip.update({
       where: { id: tripId },
       data: { deletedAt: new Date() },
     });
-    return { id: updated.id.toString(), deletedAt: updated.deletedAt! };
+    return {
+      id: updated.id.toString(),
+      deletedAt: updated.deletedAt!,
+      message: '여행이 삭제되었습니다.',
+    };
   }
 
   // =========================
