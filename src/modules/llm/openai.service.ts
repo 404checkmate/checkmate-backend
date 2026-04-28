@@ -2,6 +2,18 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import OpenAI from 'openai';
 
+const VALID_CATEGORIES = [
+  'essentials',
+  'clothing',
+  'health',
+  'toiletries',
+  'beauty',
+  'electronics',
+  'travel_goods',
+  'booking',
+  'pre_departure',
+] as const;
+
 /**
  * 사용자의 여행 컨텍스트.
  * OpenAI 프롬프트에 그대로 직렬화되어 삽입된다.
@@ -22,7 +34,9 @@ export interface TripContext {
 /**
  * OpenAI 가 반환하는 '추가 물품' 1건.
  *
- * - category: 서비스 카테고리 코드. 존재하지 않는 코드가 오면 호출부에서 ai_recommend 로 대체.
+ * - category: 서비스 카테고리 코드. 유효하지 않은 category 값이 오면 `travel_goods`로 fallback.
+ *   유효 값: essentials | clothing | health | toiletries | beauty |
+ *            electronics | travel_goods | booking | pre_departure
  * - prep_type / baggage_type: Prisma enum 값과 1:1 매핑.
  */
 export interface AdditionalItem {
@@ -88,12 +102,13 @@ export class OpenaiService {
     const raw = completion.choices[0]?.message?.content ?? '{"items":[]}';
     const parsed = this.safeParseResponse(raw);
 
-    // AI 추천 항목은 모두 ai_recommend 카테고리로 고정
     const items = parsed.items
       .filter((i) => typeof i?.title === 'string' && i.title.trim().length > 0)
       .map<AdditionalItem>((i) => ({
         title: i.title.trim(),
-        category: 'ai_recommend',
+        category: VALID_CATEGORIES.includes(i.category as (typeof VALID_CATEGORIES)[number])
+          ? (i.category as AdditionalItem['category'])
+          : 'travel_goods',
         description: i.description?.toString().trim() || undefined,
         prep_type: (['item', 'pre_booking', 'pre_departure_check'] as const).includes(
           i.prep_type as AdditionalItem['prep_type'],
