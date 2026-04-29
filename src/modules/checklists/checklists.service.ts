@@ -10,7 +10,12 @@ import {
   Prisma,
 } from '@prisma/client';
 import { PrismaService } from '../../infra/prisma/prisma.service';
-import { OpenaiService, TripContext } from '../llm/openai.service';
+import {
+  OpenaiService,
+  TripContext,
+  ReclassifyInputItem,
+  ReclassifiedItem,
+} from '../llm/openai.service';
 import type {
   UpsertItemDto,
   EditItemDto,
@@ -625,6 +630,33 @@ export class ChecklistsService {
       checkedAt: desired ? now.toISOString() : null,
       occurredAt: now.toISOString(),
     };
+  }
+
+  // =========================================================
+  // RECLASSIFY (가이드 보관함 항목 재분류)
+  // =========================================================
+
+  /**
+   * 가이드 보관함 항목들을 LLM 으로 재분류한다.
+   * - persist 하지 않는다 (refinedCategory/refinedSubCategory 는 프론트의 보관함 스냅샷 필드).
+   * - LLM 호출 자체가 실패하면(API key 미설정 등) `{ items: [], model: null }` 로 폴백 — 프론트가 fallback 처리.
+   */
+  async reclassifyGuideArchive(
+    items: ReclassifyInputItem[],
+  ): Promise<{ items: ReclassifiedItem[]; model: string | null }> {
+    if (!items || items.length === 0) {
+      return { items: [], model: null };
+    }
+    try {
+      const { items: refined, usage } = await this.openai.reclassifyGuideArchiveItems(items);
+      this.logger.log(
+        `[reclassifyGuideArchive] in=${items.length} out=${refined.length} tokens=${usage.tokens}`,
+      );
+      return { items: refined, model: usage.model };
+    } catch (e) {
+      this.logger.error(`[reclassifyGuideArchive] LLM call failed: ${(e as Error).message}`);
+      return { items: [], model: null };
+    }
   }
 
   /**

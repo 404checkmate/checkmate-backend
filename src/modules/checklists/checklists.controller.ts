@@ -24,6 +24,7 @@ import {
   EditItemDto,
   UpsertItemsDto,
 } from './dto/upsert-items.dto';
+import { ReclassifyGuideArchiveDto } from './dto/reclassify-guide-archive.dto';
 
 @Controller('checklists')
 export class ChecklistsController {
@@ -201,6 +202,36 @@ export class ChecklistsController {
     const userId = this.requireUserId(user);
     this.logger.log(`deleteItem item=${itemId} user=${userId}`);
     return this.checklists.deleteItem(BigInt(itemId), userId);
+  }
+
+  /**
+   * 가이드 보관함 항목 재분류 (LLM 기반 2차 카테고리 분류).
+   *
+   *   POST /api/checklists/reclassify-guide-archive
+   *   Body: {
+   *     tripId?: string,
+   *     entryId?: string,
+   *     items: [{ id, title, description?, detail?, category?, prepType?, subCategory? }]
+   *   }
+   *
+   *   응답: { model: string | null, items: [{ id, category, subCategory?, confidence? }] }
+   *
+   * - 인증 가드는 전역 `SupabaseJwtGuard` + `requireUserId` 로 적용 (기존 패턴 유지).
+   * - persist 하지 않음 — 결과는 프론트 보관함 스냅샷의 refinedCategory/refinedSubCategory 슬롯에 들어간다.
+   * - LLM 호출 실패 시 빈 items[] 로 폴백 (프론트는 base category 를 유지).
+   */
+  @Post('reclassify-guide-archive')
+  @HttpCode(200)
+  @Throttle({ default: { ttl: 60_000, limit: 10 } })
+  async reclassifyGuideArchive(
+    @CurrentUser() user: AuthUser | undefined,
+    @Body() dto: ReclassifyGuideArchiveDto,
+  ) {
+    const userId = this.requireUserId(user);
+    this.logger.log(
+      `reclassifyGuideArchive trip=${dto.tripId ?? '-'} entry=${dto.entryId ?? '-'} user=${userId} count=${dto.items?.length ?? 0}`,
+    );
+    return this.checklists.reclassifyGuideArchive(dto.items ?? []);
   }
 
   /** 체크 토글 (checked/unchecked) */

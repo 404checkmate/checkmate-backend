@@ -51,6 +51,33 @@ export interface AdditionalItemsResponse {
   items: AdditionalItem[];
 }
 
+/**
+ * 가이드 보관함 항목 재분류 입력 — base category 가 있어도 좋고 없어도 됨.
+ */
+export interface ReclassifyInputItem {
+  id: string;
+  title: string;
+  description?: string;
+  detail?: string;
+  category?: string;
+  prepType?: string;
+  subCategory?: string;
+}
+
+/**
+ * 재분류 결과 — 프론트의 `refinedCategory` / `refinedSubCategory` 슬롯에 그대로 들어간다.
+ */
+export interface ReclassifiedItem {
+  id: string;
+  category: string;
+  subCategory?: string;
+  confidence?: number;
+}
+
+interface ReclassifyResponse {
+  items: ReclassifiedItem[];
+}
+
 @Injectable()
 export class OpenaiService {
   private readonly logger = new Logger(OpenaiService.name);
@@ -124,6 +151,83 @@ export class OpenaiService {
 
     this.logger.log(
       `[openai] done items=${items.length} tokens=${completion.usage?.total_tokens ?? 0}`,
+    );
+
+    return {
+      items,
+      usage: {
+        tokens: completion.usage?.total_tokens ?? 0,
+        model,
+      },
+    };
+  }
+
+  /**
+   * 가이드 보관함 항목들을 더 세분화된 카테고리/서브카테고리로 재분류한다.
+   *
+   *   - 입력: 기존 base `category` 와 함께 항목들의 title/description/detail.
+   *   - 출력: id 별로 정제된 `category`(VALID_CATEGORIES 중 하나) + 자유 텍스트 `subCategory`(예: "전자기기/충전",
+   *     "의류/방한") + 0~1 사이 `confidence`.
+   *   - LLM 호출 실패/JSON 파싱 실패 시 빈 items[] 로 폴백 → 프론트 측은 기존 category 를 유지.
+   */
+  async reclassifyGuideArchiveItems(
+    inputs: ReclassifyInputItem[],
+  ): Promise<{ items: ReclassifiedItem[]; usage: { tokens: number; model: string } }> {
+    if (inputs.length === 0) {
+      return {
+        items: [],
+        usage: { tokens: 0, model: this.config.get<string>('llm.model', 'gpt-4o-mini') },
+      };
+    }
+
+    const model = this.config.get<string>('llm.model', 'gpt-4o-mini');
+    const client = this.getClient();
+
+    const systemPrompt = this.buildReclassifySystemPrompt();
+    const userPrompt = this.buildReclassifyUserPrompt(inputs);
+
+    this.logger.log(`[openai:reclassify] request model=${model} count=${inputs.length}`);
+
+    const completion = await client.chat.completions.create({
+      model,
+      temperature: 0.2,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userPrompt },
+      ],
+    });
+
+    const raw = completion.choices[0]?.message?.content ?? '{"items":[]}';
+    const parsed = this.safeParseReclassifyResponse(raw);
+
+    // id 가 입력에 존재하는 것만 살리고, category 는 VALID_CATEGORIES 로 정규화.
+    const inputIds = new Set(inputs.map((i) => i.id));
+    const items = parsed.items
+      .filter((row) => row && typeof row.id === 'string' && inputIds.has(row.id))
+      .map<ReclassifiedItem>((row) => {
+        const fallbackCategory =
+          inputs.find((i) => i.id === row.id)?.category?.trim() || 'travel_goods';
+        const category =
+          typeof row.category === 'string' &&
+          VALID_CATEGORIES.includes(row.category as (typeof VALID_CATEGORIES)[number])
+            ? row.category
+            : VALID_CATEGORIES.includes(fallbackCategory as (typeof VALID_CATEGORIES)[number])
+              ? fallbackCategory
+              : 'travel_goods';
+        const subCategory =
+          typeof row.subCategory === 'string' && row.subCategory.trim().length > 0
+            ? row.subCategory.trim().slice(0, 64)
+            : undefined;
+        const confidence =
+          typeof row.confidence === 'number' && Number.isFinite(row.confidence)
+            ? Math.max(0, Math.min(1, row.confidence))
+            : undefined;
+        return { id: row.id, category, subCategory, confidence };
+      });
+
+    this.logger.log(
+      `[openai:reclassify] done items=${items.length}/${inputs.length} tokens=${completion.usage?.total_tokens ?? 0}`,
     );
 
     return {
@@ -229,6 +333,82 @@ export class OpenaiService {
       return { items: [] };
     } catch (e) {
       this.logger.error(`[openai] JSON parse failed: ${(e as Error).message} raw=${raw.slice(0, 200)}`);
+      return { items: [] };
+    }
+  }
+
+  private buildReclassifySystemPrompt(): string {
+    return [
+      '당신은 한국인 여행자의 짐 보관함 항목을 더 세분화된 카테고리로 재분류하는 분류기입니다.',
+      '',
+      '[1차 카테고리 — 반드시 아래 9개 중 하나]',
+      'essentials   : 여행 필수 서류·결제수단 등',
+      'clothing     : 의류·신발·액세서리',
+      'health       : 의약품·건강 관련 용품',
+      'toiletries   : 세면·위생용품',
+      'beauty       : 화장품·미용기기·헤어용품',
+      'electronics  : 전자기기·충전·통신 관련',
+      'travel_goods : 여행 편의용품 (가방, 파우치, 잠금장치 등)',
+      'booking      : 출발 전 예약·신청이 필요한 사항',
+      'pre_departure: 출국 당일/직전 확인 사항',
+      '',
+      '[서브카테고리]',
+      '- 1차 카테고리 안에서 사용자에게 보여줄 짧은 한국어 라벨 (예: "충전/케이블", "방한", "상비약").',
+      '- 8자 이내, 슬래시(/)는 1개까지 허용.',
+      '- 명확하지 않으면 생략 가능 (필드 자체를 빼거나 빈 문자열).',
+      '',
+      '[confidence]',
+      '- 0~1 사이의 숫자. 카테고리·서브카테고리 모두에 대한 자신감.',
+      '',
+      '[출력 JSON — 이 구조만 허용]',
+      '{',
+      '  "items": [',
+      '    { "id": "<입력 id 그대로>", "category": "electronics", "subCategory": "충전/케이블", "confidence": 0.92 }',
+      '  ]',
+      '}',
+      '입력에 없는 id 는 생성 금지. 각 입력 id 는 정확히 한 번씩만 응답하세요.',
+      '반드시 유효한 JSON만 출력하세요.',
+    ].join('\n');
+  }
+
+  private buildReclassifyUserPrompt(items: ReclassifyInputItem[]): string {
+    const lines: string[] = [
+      '[재분류 대상 항목]',
+      '아래 항목들의 1차 카테고리와 서브카테고리를 정해 주세요. base_category 가 비어있거나 어색하면 다시 정해도 됩니다.',
+      '',
+    ];
+    items.forEach((it) => {
+      const desc = (it.description ?? '').trim();
+      const detail = (it.detail ?? '').trim();
+      lines.push(
+        [
+          `- id: ${it.id}`,
+          `  title: ${it.title}`,
+          desc ? `  description: ${desc}` : '',
+          detail ? `  detail: ${detail}` : '',
+          `  base_category: ${(it.category ?? '').trim() || '(미정)'}`,
+          it.subCategory ? `  hint_subcategory: ${it.subCategory}` : '',
+          it.prepType ? `  prep_type: ${it.prepType}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      );
+    });
+    return lines.join('\n');
+  }
+
+  private safeParseReclassifyResponse(raw: string): ReclassifyResponse {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.items)) {
+        return parsed as ReclassifyResponse;
+      }
+      this.logger.warn('[openai:reclassify] response missing items[] — fallback to empty');
+      return { items: [] };
+    } catch (e) {
+      this.logger.error(
+        `[openai:reclassify] JSON parse failed: ${(e as Error).message} raw=${raw.slice(0, 200)}`,
+      );
       return { items: [] };
     }
   }
