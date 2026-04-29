@@ -46,6 +46,7 @@ export class GuideArchivesService {
         name: true,
         archivedAt: true,
         isAiRecommended: true,
+        snapshot: true,
         checklist: {
           select: {
             status: true,
@@ -69,6 +70,7 @@ export class GuideArchivesService {
       name: a.name,
       archivedAt: a.archivedAt.toISOString(),
       isAiRecommended: a.isAiRecommended,
+      snapshot: a.snapshot,
       checklistStatus: a.checklist.status,
       completionRate: Number(a.checklist.completionRate),
       trip: {
