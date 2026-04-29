@@ -34,6 +34,15 @@ export class GuideArchivesController {
     return this.archives.listMine(userId);
   }
 
+  @Get('guide-archives/:archiveId')
+  findOne(
+    @CurrentUser() user: AuthUser | undefined,
+    @Param('archiveId', ParseIntPipe) archiveId: number,
+  ) {
+    const userId = this.requireUserId(user);
+    return this.archives.findOne(BigInt(archiveId), userId);
+  }
+
   @Get('trips/:tripId/guide-archives')
   list(@Param('tripId', ParseIntPipe) tripId: number) {
     return this.archives.listByTrip(BigInt(tripId));

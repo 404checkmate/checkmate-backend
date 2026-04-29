@@ -43,7 +43,9 @@ export class GuideArchivesService {
       },
       include: {
         checklist: {
-          include: {
+          select: {
+            status: true,
+            completionRate: true,
             trip: {
               select: {
                 id: true,
@@ -64,6 +66,8 @@ export class GuideArchivesService {
       snapshot: a.snapshot,
       archivedAt: a.archivedAt.toISOString(),
       isAiRecommended: a.isAiRecommended,
+      checklistStatus: a.checklist.status,
+      completionRate: Number(a.checklist.completionRate),
       trip: {
         id: a.checklist.trip.id.toString(),
         title: a.checklist.trip.title,
@@ -109,6 +113,24 @@ export class GuideArchivesService {
     });
 
     this.logger.log(`archive created trip=${tripId} id=${archive.id}`);
+    return this.serialize(archive);
+  }
+
+  async findOne(archiveId: bigint, userId: bigint) {
+    const archive = await this.prisma.guideArchive.findUnique({
+      where: { id: archiveId },
+      include: {
+        checklist: {
+          include: { trip: { select: { userId: true, title: true } } },
+        },
+      },
+    });
+
+    if (!archive) throw new NotFoundException('아카이브를 찾을 수 없습니다.');
+    if (archive.checklist.trip.userId !== userId) {
+      throw new ForbiddenException('접근 권한이 없습니다.');
+    }
+
     return this.serialize(archive);
   }
 

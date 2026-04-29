@@ -4,6 +4,7 @@ import {
   CheckAction,
   ChecklistGeneratedBy,
   ChecklistItemSource,
+  ChecklistStatus,
   EditType,
   LlmStatus,
   PrepType,
@@ -390,7 +391,7 @@ export class ChecklistsService {
       }
 
       return { createdIds: created, updatedIds: updated };
-    });
+    }, { timeout: 10000, maxWait: 5000 });
 
     this.logger.log(
       `[upsertItems] trip=${tripId} user=${userId} created=${createdIds.length} updated=${updatedIds.length}`,
@@ -510,7 +511,7 @@ export class ChecklistsService {
         where: { id: itemId },
         include: { category: true },
       });
-    });
+    }, { timeout: 10000, maxWait: 5000 });
 
     this.logger.log(
       `[editItem] item=${itemId} user=${userId} titleChanged=${titleChanged} descChanged=${descChanged} memoChanged=${memoChanged} orderChanged=${orderChanged}`,
@@ -594,32 +595,60 @@ export class ChecklistsService {
     const desired = action === 'checked';
     const shouldUpdate = item.isChecked !== desired;
 
-    const ops: Prisma.PrismaPromise<unknown>[] = [];
-    if (shouldUpdate) {
-      ops.push(
-        this.prisma.checklistItem.update({
+    const { completionRate, newStatus } = await this.prisma.$transaction(async (tx) => {
+      // 1. isChecked 갱신
+      if (shouldUpdate) {
+        await tx.checklistItem.update({
           where: { id: itemId },
           data: {
             isChecked: desired,
             checkedAt: desired ? now : null,
           },
-        }),
-      );
-    }
-    ops.push(
-      this.prisma.checklistItemCheck.create({
+        });
+      }
+
+      // 2. 체크 로그 기록
+      await tx.checklistItemCheck.create({
         data: {
           itemId,
           userId,
           action: action === 'checked' ? CheckAction.checked : CheckAction.unchecked,
         },
-      }),
-    );
+      });
 
-    await this.prisma.$transaction(ops);
+      // 3. 갱신 후 최신 진행률 계산 및 Checklist.status / completionRate 업데이트
+      const checklist = await tx.checklist.findFirst({
+        where: { id: item.checklistId },
+        include: {
+          items: {
+            where: { isSelected: true, deletedAt: null },
+            select: { isChecked: true },
+          },
+        },
+      });
+
+      const total = checklist?.items.length ?? 0;
+      const checked = checklist?.items.filter((i) => i.isChecked).length ?? 0;
+      const completionRate = total === 0 ? 0 : (checked / total) * 100;
+      const newStatus: ChecklistStatus =
+        completionRate === 0
+          ? ChecklistStatus.not_started
+          : completionRate >= 100
+          ? ChecklistStatus.completed
+          : ChecklistStatus.preparing;
+
+      if (shouldUpdate) {
+        await tx.checklist.update({
+          where: { id: item.checklistId },
+          data: { status: newStatus, completionRate },
+        });
+      }
+
+      return { completionRate, newStatus };
+    }, { timeout: 10000, maxWait: 5000 });
 
     this.logger.log(
-      `[toggleCheck] item=${itemId} user=${userId} action=${action} updated=${shouldUpdate}`,
+      `[toggleCheck] item=${itemId} user=${userId} action=${action} updated=${shouldUpdate} rate=${completionRate.toFixed(2)}% status=${newStatus}`,
     );
 
     return {
@@ -857,7 +886,7 @@ export class ChecklistsService {
           status: generated.summary.model ? LlmStatus.success : LlmStatus.failed,
         },
       });
-    });
+    }, { timeout: 10000, maxWait: 5000 });
 
     this.logger.log(
       `[persistChecklist] trip=${tripId} items=${generated.items.length} tokens=${generated.summary.llmTokensUsed} model=${generated.summary.model ?? 'n/a'}`,
