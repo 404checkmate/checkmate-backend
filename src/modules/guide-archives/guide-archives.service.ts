@@ -41,7 +41,11 @@ export class GuideArchivesService {
           trip: { userId, deletedAt: null },
         },
       },
-      include: {
+      select: {
+        id: true,
+        name: true,
+        archivedAt: true,
+        isAiRecommended: true,
         checklist: {
           select: {
             status: true,
@@ -63,7 +67,6 @@ export class GuideArchivesService {
     return archives.map((a) => ({
       id: a.id.toString(),
       name: a.name,
-      snapshot: a.snapshot,
       archivedAt: a.archivedAt.toISOString(),
       isAiRecommended: a.isAiRecommended,
       checklistStatus: a.checklist.status,
