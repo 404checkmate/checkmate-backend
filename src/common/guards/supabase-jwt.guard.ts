@@ -10,7 +10,7 @@ import { Reflector } from '@nestjs/core';
 import { ModuleRef } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from '../decorators/public.decorator';
 import type { AuthProviderName, AuthUser } from '../decorators/current-user.decorator';
-import { verifyHs256Jwt, type SupabaseCompatiblePayload } from '../auth/jwt.util';
+import { verifyHs256Jwt, verifyEs256Jwt, readJwtHeader, type SupabaseCompatiblePayload } from '../auth/jwt.util';
 import { UsersService } from '../../modules/users/users.service';
 import { SupabaseService } from '../../infra/supabase/supabase.service';
 
@@ -61,6 +61,7 @@ export class SupabaseJwtGuard implements CanActivate {
     const reqTag = `[auth-guard] ${req.method} ${req.originalUrl}`;
 
     const secret = this.config.get<string>('supabase.jwtSecret');
+    const supabaseUrl = this.config.get<string>('supabase.url') ?? '';
     const isProd = this.config.get<string>('app.nodeEnv') === 'production';
     const devBypass = this.config.get<boolean>('auth.devBypass') ?? true;
 
@@ -93,20 +94,39 @@ export class SupabaseJwtGuard implements CanActivate {
       throw new UnauthorizedException('Missing Bearer token');
     }
 
-    // ------ 1차: HS256 (legacy JWT secret) ------
-    let payload: SupabaseCompatiblePayload | null = verifyHs256Jwt(token, secret);
-    let verifyPath: 'hs256' | 'supabase-admin' = 'hs256';
+    // ------ alg 사전 확인 (서명 없이 헤더만 디코딩) ------
+    const jwtAlg = readJwtHeader(token)?.['alg'];
 
+    // ------ 1차: HS256 (legacy JWT secret) ------
+    let payload: SupabaseCompatiblePayload | null = null;
+    let verifyPath: 'hs256' | 'local-es256' | 'supabase-admin' = 'hs256';
+
+    if (jwtAlg === 'HS256') {
+      payload = verifyHs256Jwt(token, secret);
+    }
+
+    // ------ 2차: ES256 로컬 JWKS 검증 ------
+    // alg가 ES256이거나 HS256 검증이 실패한 경우 시도.
+    if (!payload) {
+      if (jwtAlg === 'ES256') {
+        this.logger.debug(`${reqTag} ES256 토큰 감지 → JWKS 로컬 검증 시도`);
+      } else {
+        this.logger.warn(
+          `${reqTag} HS256 검증 실패(alg=${String(jwtAlg ?? 'unknown')}) → ES256 JWKS 로컬 검증 시도`,
+        );
+      }
+      payload = await verifyEs256Jwt(token, supabaseUrl);
+      if (payload) verifyPath = 'local-es256';
+    }
+
+    // ------ 3차: Supabase admin `getUser(token)` 폴백 ------
     if (!payload) {
       this.logger.warn(
-        `${reqTag} HS256 검증 실패 → Supabase admin getUser 로 폴백 시도 ` +
-          `(신규 프로젝트의 비대칭 키 / 만료 / 서명 변경 가능성)`,
+        `${reqTag} HS256 + ES256 모두 실패 → Supabase admin getUser 폴백 시도`,
       );
-
-      // ------ 2차: Supabase admin `getUser(token)` 폴백 ------
       payload = await this.verifyViaSupabaseAdmin(token, reqTag);
       if (!payload) {
-        this.logger.error(`${reqTag} HS256 + Supabase admin 모두 실패 → 401`);
+        this.logger.error(`${reqTag} HS256 + ES256 + Supabase admin 모두 실패 → 401`);
         throw new UnauthorizedException('Invalid token');
       }
       verifyPath = 'supabase-admin';
