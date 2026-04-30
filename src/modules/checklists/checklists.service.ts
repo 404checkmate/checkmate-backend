@@ -310,7 +310,8 @@ export class ChecklistsService {
             match.description !== (input.description ?? null) ||
             match.prepType !== (input.prepType as PrepType) ||
             match.baggageType !== (input.baggageType as BaggageType) ||
-            match.orderIndex !== input.orderIndex;
+            match.orderIndex !== input.orderIndex ||
+            !match.isSelected;
 
           if (!changed) continue;
 
@@ -337,6 +338,8 @@ export class ChecklistsService {
               prepType: input.prepType as PrepType,
               baggageType: input.baggageType as BaggageType,
               orderIndex: input.orderIndex,
+              isSelected: true,
+              selectedAt: new Date(),
             },
           });
 
