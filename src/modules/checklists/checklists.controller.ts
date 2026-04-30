@@ -17,6 +17,7 @@ import {
   AuthUser,
   CurrentUser,
 } from '../../common/decorators/current-user.decorator';
+import { Public } from '../../common/decorators/public.decorator';
 import { ChecklistsService } from './checklists.service';
 import { GenerateFromContextDto } from './dto/generate-from-context.dto';
 import {
@@ -88,6 +89,7 @@ export class ChecklistsController {
    *   POST /api/checklists/generate-from-context
    *   Body: { destination, durationDays, season?, tripStart?, companions?, purposes? }
    */
+  @Public()
   @Post('generate-from-context')
   @HttpCode(200)
   @Throttle({ default: { ttl: 60_000, limit: 5 } })
