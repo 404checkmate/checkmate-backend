@@ -99,10 +99,14 @@ export class ChecklistsController {
       : dto.tripStart
         ? this.inferSeason(new Date(dto.tripStart))
         : '봄';
+    const travelMonth = dto.tripStart
+      ? new Date(dto.tripStart).getMonth() + 1
+      : new Date().getMonth() + 1;
     return this.checklists.generateFromContext({
       destination: dto.destination,
       durationDays: dto.durationDays,
       season,
+      travelMonth,
       companions: dto.companions ?? [],
       purposes: dto.purposes ?? [],
     });

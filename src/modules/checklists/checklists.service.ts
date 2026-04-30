@@ -1078,6 +1078,7 @@ export class ChecklistsService {
       destination,
       durationDays,
       season: this.inferSeason(trip.tripStart),
+      travelMonth: trip.tripStart.getMonth() + 1,
       companions,
       purposes,
     };
