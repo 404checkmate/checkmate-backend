@@ -107,6 +107,13 @@ enum UserEventType {
   prepare_action
   re_search
   missing_item_detection
+  page_view
+  cta_click
+  step_complete
+  login
+  trip_created
+  item_checked
+  session_start
 }
 
 // =========================================================
