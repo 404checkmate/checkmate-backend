@@ -32,6 +32,34 @@ export class UsersService {
     return user;
   }
 
+  async getOne(targetId: bigint, requesterId: bigint) {
+    const user = await this.prisma.user.findFirst({
+      where: { id: targetId, deletedAt: null },
+    });
+    if (!user) throw new NotFoundException(`User ${targetId} not found`);
+
+    if (targetId === requesterId) {
+      return {
+        id: user.id.toString(),
+        email: user.email,
+        nickname: user.nickname,
+        profileImageUrl: user.profileImageUrl,
+        gender: user.gender,
+        birthDate: user.birthDate,
+        onboardingCompletedAt: user.onboardingCompletedAt,
+        legalConsentAcceptedAt: user.legalConsentAcceptedAt,
+        marketingOptIn: user.marketingOptIn,
+        createdAt: user.createdAt,
+      };
+    }
+
+    return {
+      id: user.id.toString(),
+      nickname: user.nickname,
+      profileImageUrl: user.profileImageUrl,
+    };
+  }
+
   /**
    * 온보딩 프로필 수정. 전달된 필드만 업데이트한다.
    * (Prisma 특성상 undefined 는 no-op, null 은 컬럼을 비우는 의미)

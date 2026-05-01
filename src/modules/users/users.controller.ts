@@ -23,8 +23,12 @@ export class UsersController {
   constructor(private readonly users: UsersService) {}
 
   @Get(':id')
-  async getOne(@Param('id', ParseIntPipe) id: number) {
-    return this.users.requireById(BigInt(id));
+  async getOne(
+    @CurrentUser() user: AuthUser | undefined,
+    @Param('id', ParseIntPipe) id: number,
+  ) {
+    const requesterId = this.requireUserId(user);
+    return this.users.getOne(BigInt(id), requesterId);
   }
 
   /**
@@ -94,5 +98,13 @@ export class UsersController {
       acceptedAt: updated.legalConsentAcceptedAt?.toISOString() ?? null,
       marketingOptIn: updated.marketingOptIn,
     };
+  }
+
+  private requireUserId(user: AuthUser | undefined): bigint {
+    if (!user) throw new UnauthorizedException('No session');
+    if (user.userId == null) {
+      throw new BadRequestException('JIT 프로비저닝이 아직 안 된 세션입니다.');
+    }
+    return user.userId;
   }
 }
