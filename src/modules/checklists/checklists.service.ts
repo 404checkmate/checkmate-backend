@@ -293,8 +293,21 @@ export class ChecklistsService {
         existing.map((e) => [this.normalizeTitle(e.title), e]),
       );
 
-      const created: bigint[] = [];
-      const updated: bigint[] = [];
+      type ExistingItem = (typeof existing)[number];
+
+      const toCreate: Array<{ input: UpsertItemDto; categoryId: bigint }> = [];
+      const toUpdate: Array<{
+        input: UpsertItemDto;
+        match: ExistingItem;
+        before: object;
+        after: object;
+      }> = [];
+
+      const mapSource = (s: UpsertItemDto['source']): ChecklistItemSource => {
+        if (s === 'template') return ChecklistItemSource.template;
+        if (s === 'llm') return ChecklistItemSource.llm;
+        return ChecklistItemSource.user_added;
+      };
 
       for (const input of items) {
         const key = this.normalizeTitle(input.title);
@@ -315,57 +328,35 @@ export class ChecklistsService {
 
           if (!changed) continue;
 
-          const before = {
-            title: match.title,
-            description: match.description,
-            prepType: match.prepType,
-            baggageType: match.baggageType,
-            orderIndex: match.orderIndex,
-          };
-
-          const after = {
-            title: input.title,
-            description: input.description ?? null,
-            prepType: input.prepType,
-            baggageType: input.baggageType,
-            orderIndex: input.orderIndex,
-          };
-
-          await tx.checklistItem.update({
-            where: { id: match.id },
-            data: {
+          toUpdate.push({
+            input,
+            match,
+            before: {
+              title: match.title,
+              description: match.description,
+              prepType: match.prepType,
+              baggageType: match.baggageType,
+              orderIndex: match.orderIndex,
+            },
+            after: {
+              title: input.title,
               description: input.description ?? null,
-              prepType: input.prepType as PrepType,
-              baggageType: input.baggageType as BaggageType,
+              prepType: input.prepType,
+              baggageType: input.baggageType,
               orderIndex: input.orderIndex,
-              isSelected: true,
-              selectedAt: new Date(),
             },
           });
-
-          await tx.checklistItemEdit.create({
-            data: {
-              itemId: match.id,
-              userId,
-              editType:
-                match.orderIndex !== input.orderIndex
-                  ? EditType.reorder
-                  : EditType.text,
-              beforeValue: before as Prisma.InputJsonValue,
-              afterValue: after as Prisma.InputJsonValue,
-            },
-          });
-          updated.push(match.id);
         } else {
-          const mapSource = (s: UpsertItemDto['source']): ChecklistItemSource => {
-            if (s === 'template') return ChecklistItemSource.template;
-            if (s === 'llm') return ChecklistItemSource.llm;
-            return ChecklistItemSource.user_added;
-          };
+          toCreate.push({ input, categoryId });
+        }
+      }
 
-          const createdItem = await tx.checklistItem.create({
+      // 신규 항목 병렬 생성 (createMany는 id 반환 불가 → edit log용 itemId 확보를 위해 Promise.all)
+      const createdItems = await Promise.all(
+        toCreate.map(({ input, categoryId }) =>
+          tx.checklistItem.create({
             data: {
-              checklistId: checklist.id,
+              checklistId: checklist!.id,
               categoryId,
               title: input.title,
               description: input.description ?? null,
@@ -376,25 +367,58 @@ export class ChecklistsService {
               isSelected: true,
               selectedAt: new Date(),
             },
-          });
-          await tx.checklistItemEdit.create({
+          }),
+        ),
+      );
+
+      // 수정 항목 병렬 업데이트
+      await Promise.all(
+        toUpdate.map(({ input, match }) =>
+          tx.checklistItem.update({
+            where: { id: match.id },
             data: {
-              itemId: createdItem.id,
-              userId,
-              editType: EditType.add,
-              afterValue: {
-                title: createdItem.title,
-                source: createdItem.source,
-                orderIndex: createdItem.orderIndex,
-              } as Prisma.InputJsonValue,
+              description: input.description ?? null,
+              prepType: input.prepType as PrepType,
+              baggageType: input.baggageType as BaggageType,
+              orderIndex: input.orderIndex,
+              isSelected: true,
+              selectedAt: new Date(),
             },
-          });
-          created.push(createdItem.id);
-        }
+          }),
+        ),
+      );
+
+      // 편집 로그 일괄 기록 (createMany — round-trip 1번으로 감소)
+      const editLogData: Prisma.ChecklistItemEditCreateManyInput[] = [
+        ...createdItems.map((item) => ({
+          itemId: item.id,
+          userId,
+          editType: EditType.add,
+          afterValue: {
+            title: item.title,
+            source: item.source,
+            orderIndex: item.orderIndex,
+          } as Prisma.InputJsonValue,
+        })),
+        ...toUpdate.map(({ match, input, before, after }) => ({
+          itemId: match.id,
+          userId,
+          editType:
+            match.orderIndex !== input.orderIndex ? EditType.reorder : EditType.text,
+          beforeValue: before as Prisma.InputJsonValue,
+          afterValue: after as Prisma.InputJsonValue,
+        })),
+      ];
+
+      if (editLogData.length > 0) {
+        await tx.checklistItemEdit.createMany({ data: editLogData });
       }
 
-      return { createdIds: created, updatedIds: updated };
-    }, { timeout: 10000, maxWait: 5000 });
+      return {
+        createdIds: createdItems.map((i) => i.id),
+        updatedIds: toUpdate.map(({ match }) => match.id),
+      };
+    }, { timeout: 30000, maxWait: 10000 });
 
     this.logger.log(
       `[upsertItems] trip=${tripId} user=${userId} created=${createdIds.length} updated=${updatedIds.length}`,
@@ -514,7 +538,7 @@ export class ChecklistsService {
         where: { id: itemId },
         include: { category: true },
       });
-    }, { timeout: 10000, maxWait: 5000 });
+    }, { timeout: 30000, maxWait: 10000 });
 
     this.logger.log(
       `[editItem] item=${itemId} user=${userId} titleChanged=${titleChanged} descChanged=${descChanged} memoChanged=${memoChanged} orderChanged=${orderChanged}`,
@@ -648,7 +672,7 @@ export class ChecklistsService {
       }
 
       return { completionRate, newStatus };
-    }, { timeout: 10000, maxWait: 5000 });
+    }, { timeout: 30000, maxWait: 10000 });
 
     this.logger.log(
       `[toggleCheck] item=${itemId} user=${userId} action=${action} updated=${shouldUpdate} rate=${completionRate.toFixed(2)}% status=${newStatus}`,
