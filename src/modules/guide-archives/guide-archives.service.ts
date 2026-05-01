@@ -82,12 +82,15 @@ export class GuideArchivesService {
     }));
   }
 
-  async createForTrip(tripId: bigint, input: { name?: string; snapshot?: unknown; isAiRecommended?: boolean }) {
+  async createForTrip(tripId: bigint, userId: bigint, input: { name?: string; snapshot?: unknown; isAiRecommended?: boolean }) {
     const trip = await this.prisma.trip.findFirst({
       where: { id: tripId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, userId: true },
     });
     if (!trip) throw new NotFoundException(`Trip ${tripId} not found`);
+    if (trip.userId !== userId) {
+      throw new ForbiddenException('이 여행에 대한 권한이 없습니다.');
+    }
 
     // Checklist 가 없으면 lazy 생성 (아카이브만 먼저 저장하는 케이스 방어).
     let checklist = await this.prisma.checklist.findUnique({
@@ -139,11 +142,19 @@ export class GuideArchivesService {
     return this.serialize(archive);
   }
 
-  async update(archiveId: bigint, patch: { name?: string; snapshot?: unknown }) {
+  async update(archiveId: bigint, userId: bigint, patch: { name?: string; snapshot?: unknown }) {
     const existing = await this.prisma.guideArchive.findUnique({
       where: { id: archiveId },
+      include: {
+        checklist: {
+          include: { trip: { select: { userId: true } } },
+        },
+      },
     });
-    if (!existing) throw new NotFoundException(`archive ${archiveId} not found`);
+    if (!existing) throw new NotFoundException('아카이브를 찾을 수 없습니다.');
+    if (existing.checklist.trip.userId !== userId) {
+      throw new ForbiddenException('수정 권한이 없습니다.');
+    }
 
     const data: Prisma.GuideArchiveUpdateInput = {};
     if (typeof patch.name === 'string') {

@@ -51,18 +51,22 @@ export class GuideArchivesController {
   @Post('trips/:tripId/guide-archives')
   @HttpCode(201)
   create(
+    @CurrentUser() user: AuthUser | undefined,
     @Param('tripId', ParseIntPipe) tripId: number,
     @Body() body: CreateGuideArchiveDto,
   ) {
-    return this.archives.createForTrip(BigInt(tripId), body ?? {});
+    const userId = this.requireUserId(user);
+    return this.archives.createForTrip(BigInt(tripId), userId, body ?? {});
   }
 
   @Patch('guide-archives/:archiveId')
   update(
+    @CurrentUser() user: AuthUser | undefined,
     @Param('archiveId', ParseIntPipe) archiveId: number,
     @Body() body: { name?: string; snapshot?: unknown },
   ) {
-    return this.archives.update(BigInt(archiveId), body ?? {});
+    const userId = this.requireUserId(user);
+    return this.archives.update(BigInt(archiveId), userId, body ?? {});
   }
 
   @Delete('guide-archives/:archiveId')
