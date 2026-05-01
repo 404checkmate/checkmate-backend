@@ -315,21 +315,44 @@ export class TripsService {
    *   - country 불일치 (주 목적 국가에 속하지 않는 도시)
    */
   private async resolveCityInputs(cities: TripCityInputDto[], expectedCountryId: bigint) {
+    if (!cities.length) return [];
+
+    for (const c of cities) {
+      if (!c.cityIata && !c.cityId) {
+        throw new BadRequestException('cities[*] 는 cityIata 또는 cityId 중 하나가 필수입니다.');
+      }
+    }
+
+    const iataCodes = cities
+      .filter((c) => c.cityIata)
+      .map((c) => c.cityIata!.toUpperCase());
+
+    const cityIds = cities
+      .filter((c) => c.cityId)
+      .map((c) => BigInt(c.cityId!));
+
+    const rows = await this.prisma.city.findMany({
+      where: {
+        OR: [
+          ...(iataCodes.length ? [{ iataCode: { in: iataCodes } }] : []),
+          ...(cityIds.length ? [{ id: { in: cityIds } }] : []),
+        ],
+      },
+    });
+
+    const byIata = new Map(rows.filter((r) => r.iataCode).map((r) => [r.iataCode!, r]));
+    const byId = new Map(rows.map((r) => [r.id.toString(), r]));
+
     const result: Array<{
       cityId: bigint;
       orderIndex: number;
       visitStart: Date | null;
       visitEnd: Date | null;
       isAutoSynced: boolean;
-    }> = [];
-
-    for (const c of cities) {
-      if (!c.cityIata && !c.cityId) {
-        throw new BadRequestException('cities[*] 는 cityIata 또는 cityId 중 하나가 필수입니다.');
-      }
+    }> = cities.map((c) => {
       const row = c.cityIata
-        ? await this.prisma.city.findFirst({ where: { iataCode: c.cityIata.toUpperCase() } })
-        : await this.prisma.city.findUnique({ where: { id: BigInt(c.cityId!) } });
+        ? byIata.get(c.cityIata.toUpperCase())
+        : byId.get(String(c.cityId));
       if (!row) {
         throw new BadRequestException(
           `존재하지 않는 도시: ${c.cityIata ?? `#${c.cityId}`}`,
@@ -340,14 +363,14 @@ export class TripsService {
           `city ${row.id}(${row.nameEn}) 의 countryId 가 요청 국가와 다릅니다. 허용하되 경고만 기록합니다.`,
         );
       }
-      result.push({
+      return {
         cityId: row.id,
         orderIndex: c.orderIndex,
         visitStart: c.visitStart ? new Date(c.visitStart) : null,
         visitEnd: c.visitEnd ? new Date(c.visitEnd) : null,
         isAutoSynced: c.isAutoSynced ?? false,
-      });
-    }
+      };
+    });
 
     const orders = result.map((r) => r.orderIndex);
     if (new Set(orders).size !== orders.length) {
