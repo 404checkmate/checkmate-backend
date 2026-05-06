@@ -3,7 +3,7 @@ import { Prisma, UserEventType } from '@prisma/client';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 
 export interface IngestEventInput {
-  userId: bigint;
+  userId?: bigint | null;
   tripId?: bigint | null;
   itemId?: bigint | null;
   sessionId: string;
@@ -24,7 +24,7 @@ export class AnalyticsService {
   ingestOne(input: IngestEventInput) {
     return this.prisma.userEvent.create({
       data: {
-        userId: input.userId,
+        userId: input.userId ?? null,
         tripId: input.tripId ?? null,
         itemId: input.itemId ?? null,
         sessionId: input.sessionId,
@@ -42,7 +42,7 @@ export class AnalyticsService {
     if (events.length === 0) return { count: 0 };
     return this.prisma.userEvent.createMany({
       data: events.map((e) => ({
-        userId: e.userId,
+        userId: e.userId ?? null,
         tripId: e.tripId ?? null,
         itemId: e.itemId ?? null,
         sessionId: e.sessionId,
