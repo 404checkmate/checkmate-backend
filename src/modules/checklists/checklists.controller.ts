@@ -75,10 +75,28 @@ export class ChecklistsController {
    *   같은 trip 으로 N 회 호출해도 OpenAI 는 최대 1회만 호출된다.
    */
   @Post('generate/:tripId')
-  @HttpCode(200)
+  @HttpCode(202)
   @Throttle({ default: { ttl: 60_000, limit: 5 } })
   generate(@Param('tripId', ParseIntPipe) tripId: number) {
-    return this.checklists.generateForTrip(BigInt(tripId));
+    void this.checklists.generateForTripBackground(BigInt(tripId));
+    return { status: 'generating' };
+  }
+
+  /**
+   * 체크리스트 생성 완료 여부 polling 용.
+   *
+   *   GET /api/checklists/generate/:tripId/status
+   *   응답: { status: 'completed' | 'generating' }
+   */
+  @Get('generate/:tripId/status')
+  @HttpCode(200)
+  @Throttle({ default: { ttl: 60_000, limit: 30 } })
+  async getGenerateStatus(@Param('tripId', ParseIntPipe) tripId: number) {
+    const cached = await this.checklists.loadPersistedChecklistItems(BigInt(tripId));
+    if (cached && cached.items.length > 0) {
+      return { status: 'completed' };
+    }
+    return { status: 'generating' };
   }
 
   /**

@@ -202,6 +202,20 @@ export class ChecklistsService {
   }
 
   /**
+   * 백그라운드 생성 — 컨트롤러에서 await 없이 호출 (fire-and-forget).
+   * 에러가 발생해도 throw 하지 않고 logger.error 만 기록한다.
+   */
+  async generateForTripBackground(tripId: bigint): Promise<void> {
+    try {
+      await this.generateForTrip(tripId);
+    } catch (e) {
+      this.logger.error(
+        `[generateForTripBackground] trip=${tripId} failed: ${(e as Error).message}`,
+      );
+    }
+  }
+
+  /**
    * Trip 이 DB 에 없는 경우에도 돌릴 수 있는 컨텍스트 기반 생성.
    * - persist 는 수행하지 않는다 (tripId 가 없으므로 ChecklistItem 을 저장할 위치가 없음).
    * - Phase 3 이후로는 프론트가 항상 먼저 Trip 을 만들고 `/generate/:tripId` 를 쓰는 것이 권장 경로.
@@ -1019,7 +1033,7 @@ export class ChecklistsService {
     return trip;
   }
 
-  private async loadPersistedChecklistItems(tripId: bigint): Promise<{
+  async loadPersistedChecklistItems(tripId: bigint): Promise<{
     items: PersistedChecklistItem[];
     generatedBy: ChecklistGeneratedBy;
   } | null> {

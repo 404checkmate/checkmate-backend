@@ -95,7 +95,7 @@ export class OpenaiService {
         'LLM_API_KEY 가 설정되지 않았습니다. .env 에 OpenAI API Key 를 넣어주세요.',
       );
     }
-    this.client = new OpenAI({ apiKey, timeout: 15_000 });
+    this.client = new OpenAI({ apiKey, timeout: 12_000 });
     return this.client;
   }
 
@@ -121,6 +121,7 @@ export class OpenaiService {
     const completion = await client.chat.completions.create({
       model,
       temperature: 0.5,
+      max_tokens: 1500,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },
@@ -278,9 +279,10 @@ ${this.buildContextSection(ctx)}
 ## 현지 디지털 인프라
 - 지도 앱 (구글맵 사용 불가 국가: 중국→가오더/바이두, 러시아→얀덱스 등)
 - 현지 주요 메신저 (LINE: 일본/태국, WeChat: 중국, WhatsApp: 동남아/유럽/중동)
-- VPN 필요 여부 (중국, 러시아 등 인터넷 제한 국가)
 - 번역 앱 (파파고, 구글번역 오프라인 팩 다운로드)
 → 국가별 디지털 환경에 맞게 선별
+
+${this.buildVpnSection(ctx)}
 
 ## 기후/날씨 대응
 ${this.buildWeatherSection(ctx)}
@@ -290,6 +292,10 @@ ${this.buildStyleSection(ctx.purposes)}
 
 ## 동행 유형별 특화 준비물
 ${this.buildCompanionSection(ctx.companions)}
+
+${this.buildVisaSection(ctx)}
+
+${this.buildFoodAppSection(ctx)}
 
 [추천 품질 기준]
 - 뻔한 항목 절대 금지: 누구나 아는 것은 내지 않음
@@ -449,6 +455,38 @@ baggage_type: carry_on|checked|none
     return hints.length > 0 ? hints.join('\n\n') : '- 일반 관광: 기본 준비물로 충분';
   }
 
+  private buildVpnSection(ctx: TripContext): string {
+    return `
+## VPN 추천 기준 (매우 보수적으로 적용)
+
+[VPN 추천 허용 국가 — 아래 국가만 추천]
+- 중국: 구글/유튜브/인스타 등 차단 → VPN 없으면 인터넷 사실상 불가
+- 러시아: 다수 서비스 차단
+- 이란: 대부분 SNS/서비스 차단
+
+[VPN 추천 금지 국가 — 아래 국가는 절대 VPN 추천 금지]
+- 아랍에미리트(UAE): VPN 사용 불법, 적발 시 벌금/구금
+- 카타르: VPN 사용 불법
+- 오만: VPN 사용 불법
+- 이라크: VPN 사용 불법
+- 벨라루스: VPN 사용 불법
+- 투르크메니스탄: VPN 사용 불법
+- 북한: VPN 사용 불법
+
+[그 외 모든 국가]
+- VPN 추천 금지
+- "보안을 위해 VPN을 사용하세요" 같은 일반적 권유 절대 금지
+
+출력 형식 (VPN 추천 허용 국가에만 사용):
+{
+  "title": "VPN 앱 설치 (${ctx.destination} 필수)",
+  "description": "${ctx.destination}에서는 구글/유튜브/카카오 등이 차단됨. 입국 전 ExpressVPN, NordVPN 등 설치 필수. 현지에서는 앱스토어 접근 불가",
+  "category": "travel_goods",
+  "prep_type": "item",
+  "baggage_type": "none"
+}`.trim();
+  }
+
   private buildCompanionSection(companions: string[]): string {
     const hasCompanion = (keyword: string) => companions.some((c) => c.includes(keyword));
     const hints: string[] = [];
@@ -506,6 +544,74 @@ baggage_type: carry_on|checked|none
     }
 
     return hints.length > 0 ? hints.join('\n\n') : '';
+  }
+
+  private buildVisaSection(ctx: TripContext): string {
+    return `
+## 비자 및 입국 서류 (pre_departure_check 타입으로 추가)
+아래 기준으로 ${ctx.destination} 방문에 필요한 비자/서류 항목을 반드시 검토할 것.
+
+[한국 여권 소지자 기준으로 판단]
+- 무비자 입국 가능 국가: 비자 불필요 → 입국카드, 세관신고서 등 도착 시 서류만 안내
+- 도착비자(VOA) 가능 국가: 도착비자 신청 방법, 준비 서금액, 필요 서류 안내
+- 사전 비자 필수 국가 (예: 중국, 인도, 러시아, 베트남 등):
+  → 비자 종류(관광/전자비자/일반비자), 신청 방법, 소요 기간 안내
+- 전자여행허가(ETA/ESTA) 필요 국가 (예: 미국 ESTA, 캐나다 eTA, 호주 ETA):
+  → 신청 사이트, 비용, 유효기간 안내
+
+출력 형식 예시:
+{
+  "title": "중국 비자 사전 발급",
+  "description": "한국인은 중국 관광 시 사전 비자 필수. 대사관 또는 비자센터에서 발급, 보통 3~5 영업일 소요",
+  "category": "pre_departure",
+  "prep_type": "pre_departure_check",
+  "baggage_type": "none"
+}
+
+{
+  "title": "미국 ESTA 전자여행허가 신청",
+  "description": "미국 입국 72시간 전 공식 사이트(esta.cbp.dhs.gov)에서 신청, $21, 2년 유효",
+  "category": "pre_departure",
+  "prep_type": "pre_departure_check",
+  "baggage_type": "none"
+}`.trim();
+  }
+
+  private buildFoodAppSection(ctx: TripContext): string {
+    const hasFoodStyle = ctx.purposes.some(
+      (p) => p.includes('맛집') || p.includes('미식') || p.includes('음식') || p.includes('먹방'),
+    );
+
+    if (!hasFoodStyle) return '';
+
+    return `
+## 맛집/식당 앱 추천 (travel_goods 타입으로 추가)
+${ctx.destination} 여행 시 실제로 유용한 맛집/배달 앱을 국가별로 구체적으로 추천할 것.
+
+[국가별 맛집/식당 앱 가이드]
+- 일본: 타베로그(Tabelog), 구루나비(Gurunavi), 핫페퍼그루메(HotPepper Gourmet)
+- 태국/동남아: GrabFood, Foodpanda, LINE MAN(태국)
+- 중국: 다중뎬핑(大众点评), 메이퇀(美团)
+- 미국/캐나다: Yelp, OpenTable, Resy
+- 유럽: TheFork, TripAdvisor
+- 호주: Zomato, DoorDash
+- 중동: Talabat, Deliveroo
+- 인도: Zomato, Swiggy
+- 전세계 공통: Google Maps(맛집 검색), TripAdvisor
+
+출력 형식 예시:
+{
+  "title": "타베로그(Tabelog) 앱 설치",
+  "description": "일본 최대 맛집 리뷰 앱. 평점 3.5 이상이면 현지인도 인정하는 맛집. 한국어 지원",
+  "category": "travel_goods",
+  "prep_type": "item",
+  "baggage_type": "none"
+}
+
+주의:
+- 앱 이름과 특징을 구체적으로 명시할 것
+- 해당 국가에서 실제로 많이 쓰는 앱만 추천
+- 무료/유료 여부, 한국어 지원 여부 포함하면 더 좋음`.trim();
   }
 
   private buildUserPrompt(ctx: TripContext): string {
