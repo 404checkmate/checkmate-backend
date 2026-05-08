@@ -52,6 +52,7 @@ export class AuthController {
               gender: profile.gender,
               birthDate: profile.birthDate,
               createdAt: profile.createdAt,
+              legalConsentAcceptedAt: profile.legalConsentAcceptedAt ?? null,
             }
           : null,
       },
