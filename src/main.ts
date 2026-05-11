@@ -43,6 +43,10 @@ async function bootstrap() {
     `CORS origin=${isWildcard ? '*' : origins.join(', ')} credentials=${allowCredentials}`,
     'Bootstrap',
   );
+  if (!process.env.CORS_ORIGIN) {
+    // eslint-disable-next-line no-console
+    console.warn('⚠️  CORS_ORIGIN 환경변수 미설정 — 모든 오리진 허용 중 (프로덕션 위험)');
+  }
   if (isWildcard && process.env.NODE_ENV === 'production') {
     Logger.warn(
       'CORS_ORIGIN=* 는 운영 환경에서 권장되지 않습니다. 실 도메인만 허용하세요.',
