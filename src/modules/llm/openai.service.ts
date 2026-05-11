@@ -194,6 +194,7 @@ export class OpenaiService {
     const completion = await client.chat.completions.create({
       model,
       temperature: 0.2,
+      max_tokens: 800,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },

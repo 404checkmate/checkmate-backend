@@ -48,12 +48,13 @@ export class TripsService {
     });
   }
 
-  async findOne(tripId: bigint): Promise<TripDetail> {
+  async findOne(tripId: bigint, userId: bigint): Promise<TripDetail> {
     const trip = await this.prisma.trip.findFirst({
       where: { id: tripId, deletedAt: null },
       include: tripDetailInclude,
     });
     if (!trip) throw new NotFoundException(`Trip ${tripId} not found`);
+    if (trip.userId !== userId) throw new ForbiddenException('조회 권한이 없습니다.');
     return trip;
   }
 
@@ -128,17 +129,18 @@ export class TripsService {
     });
 
     this.logger.log(`trip created id=${created.id} user=${userId} country=${country.code}`);
-    return this.findOne(created.id);
+    return this.findOne(created.id, userId);
   }
 
   // =========================
   // UPDATE (partial)
   // =========================
-  async update(tripId: bigint, dto: UpdateTripDto): Promise<TripDetail> {
+  async update(tripId: bigint, userId: bigint, dto: UpdateTripDto): Promise<TripDetail> {
     const existing = await this.prisma.trip.findFirst({
       where: { id: tripId, deletedAt: null },
     });
     if (!existing) throw new NotFoundException(`Trip ${tripId} not found`);
+    if (existing.userId !== userId) throw new ForbiddenException('수정 권한이 없습니다.');
 
     if (dto.tripStart && dto.tripEnd) {
       this.assertDateRange(dto.tripStart, dto.tripEnd);
@@ -233,7 +235,7 @@ export class TripsService {
       }
     });
 
-    return this.findOne(tripId);
+    return this.findOne(tripId, userId);
   }
 
   // =========================

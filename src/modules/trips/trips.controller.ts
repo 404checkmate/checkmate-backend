@@ -37,8 +37,12 @@ export class TripsController {
   }
 
   @Get(':id')
-  findOne(@Param('id', ParseIntPipe) id: number) {
-    return this.trips.findOne(BigInt(id));
+  findOne(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthUser | undefined,
+  ) {
+    const userId = this.requireUserId(user);
+    return this.trips.findOne(BigInt(id), userId);
   }
 
   /**
@@ -65,8 +69,13 @@ export class TripsController {
   }
 
   @Patch(':id')
-  update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateTripDto) {
-    return this.trips.update(BigInt(id), dto);
+  update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateTripDto,
+    @CurrentUser() user: AuthUser | undefined,
+  ) {
+    const userId = this.requireUserId(user);
+    return this.trips.update(BigInt(id), userId, dto);
   }
 
   @Delete(':id')
