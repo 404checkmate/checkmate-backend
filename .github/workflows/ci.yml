@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Node.js 설정
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: 의존성 설치
+        run: npm ci
+
+      - name: 빌드 검증
+        run: npm run build
+
+      - name: CORS_ORIGIN 환경변수 검증
+        run: |
+          if [ -z "${{ secrets.CORS_ORIGIN }}" ]; then
+            echo "⚠️ CORS_ORIGIN 미설정 경고"
+          fi
