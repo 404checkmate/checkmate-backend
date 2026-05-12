@@ -1104,7 +1104,10 @@ export class ChecklistsService {
       ) + 1,
     );
 
-    const cityList = trip.cities.map((c) => c.city.nameKo).join(', ');
+    const cityList = trip.cities
+      .map((c) => c.city?.nameKo ?? c.customCityName ?? '')
+      .filter(Boolean)
+      .join(', ');
     const destination = cityList ? `${trip.country.nameKo} (${cityList})` : trip.country.nameKo;
 
     const companions: string[] = trip.companions.map((c) => c.companionType.labelKo);

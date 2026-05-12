@@ -277,16 +277,17 @@ model Trip {
 }
 
 model TripCity {
-  id           BigInt    @id @default(autoincrement())
-  tripId       BigInt    @map("trip_id")
-  cityId       BigInt    @map("city_id")
-  orderIndex   Int       @map("order_index")
-  visitStart   DateTime? @map("visit_start") @db.Date
-  visitEnd     DateTime? @map("visit_end") @db.Date
-  isAutoSynced Boolean   @default(false) @map("is_auto_synced")
+  id             BigInt    @id @default(autoincrement())
+  tripId         BigInt    @map("trip_id")
+  cityId         BigInt?   @map("city_id")
+  customCityName String?   @map("custom_city_name")
+  orderIndex     Int       @map("order_index")
+  visitStart     DateTime? @map("visit_start") @db.Date
+  visitEnd       DateTime? @map("visit_end") @db.Date
+  isAutoSynced   Boolean   @default(false) @map("is_auto_synced")
 
-  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  city City @relation(fields: [cityId], references: [id])
+  trip Trip  @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  city City? @relation(fields: [cityId], references: [id])
 
   @@index([tripId, orderIndex])
   @@map("trip_cities")

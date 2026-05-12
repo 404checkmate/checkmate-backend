@@ -10,6 +10,7 @@ import {
   IsString,
   Length,
   Matches,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -48,6 +49,12 @@ export class TripCityInputDto {
   @IsOptional()
   @IsBoolean()
   isAutoSynced?: boolean;
+
+  /** DB에 없는 도시를 직접 입력한 경우 사용. cityIata/cityId 가 없을 때 fallback. */
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  customCityName?: string;
 }
 
 /**

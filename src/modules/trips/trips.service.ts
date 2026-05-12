@@ -92,6 +92,7 @@ export class TripsService {
           data: cityRows.map((c) => ({
             tripId: trip.id,
             cityId: c.cityId,
+            customCityName: c.customCityName,
             orderIndex: c.orderIndex,
             visitStart: c.visitStart,
             visitEnd: c.visitEnd,
@@ -191,6 +192,7 @@ export class TripsService {
             data: cityRows.map((c) => ({
               tripId,
               cityId: c.cityId,
+              customCityName: c.customCityName,
               orderIndex: c.orderIndex,
               visitStart: c.visitStart,
               visitEnd: c.visitEnd,
@@ -310,18 +312,20 @@ export class TripsService {
   }
 
   /**
-   * 프론트가 보낸 도시 입력(iata 또는 cityId)을 실제 city 행으로 매핑한다.
+   * 프론트가 보낸 도시 입력(iata/cityId/customCityName)을 실제 city 행으로 매핑한다.
+   * DB에 없는 도시의 경우 cityId=null + customCityName 으로 저장한다.
    * 오류 상황:
-   *   - iata/cityId 둘 다 비어있음
-   *   - 해당하는 city 가 존재하지 않음
-   *   - country 불일치 (주 목적 국가에 속하지 않는 도시)
+   *   - iata/cityId/customCityName 모두 비어있음
+   *   - DB 조회 결과 없고 customCityName 도 없음
    */
   private async resolveCityInputs(cities: TripCityInputDto[], expectedCountryId: bigint) {
     if (!cities.length) return [];
 
     for (const c of cities) {
-      if (!c.cityIata && !c.cityId) {
-        throw new BadRequestException('cities[*] 는 cityIata 또는 cityId 중 하나가 필수입니다.');
+      if (!c.cityIata && !c.cityId && !c.customCityName?.trim()) {
+        throw new BadRequestException(
+          'cities[*] 는 cityIata, cityId, customCityName 중 하나가 필수입니다.',
+        );
       }
     }
 
@@ -333,20 +337,25 @@ export class TripsService {
       .filter((c) => c.cityId)
       .map((c) => BigInt(c.cityId!));
 
-    const rows = await this.prisma.city.findMany({
-      where: {
-        OR: [
-          ...(iataCodes.length ? [{ iataCode: { in: iataCodes } }] : []),
-          ...(cityIds.length ? [{ id: { in: cityIds } }] : []),
-        ],
-      },
-    });
+    let byIata = new Map<string, { id: bigint; iataCode: string | null; nameEn: string; countryId: bigint }>();
+    let byId = new Map<string, { id: bigint; iataCode: string | null; nameEn: string; countryId: bigint }>();
 
-    const byIata = new Map(rows.filter((r) => r.iataCode).map((r) => [r.iataCode!, r]));
-    const byId = new Map(rows.map((r) => [r.id.toString(), r]));
+    if (iataCodes.length > 0 || cityIds.length > 0) {
+      const rows = await this.prisma.city.findMany({
+        where: {
+          OR: [
+            ...(iataCodes.length ? [{ iataCode: { in: iataCodes } }] : []),
+            ...(cityIds.length ? [{ id: { in: cityIds } }] : []),
+          ],
+        },
+      });
+      byIata = new Map(rows.filter((r) => r.iataCode).map((r) => [r.iataCode!, r]));
+      byId = new Map(rows.map((r) => [r.id.toString(), r]));
+    }
 
     const result: Array<{
-      cityId: bigint;
+      cityId: bigint | null;
+      customCityName: string | null;
       orderIndex: number;
       visitStart: Date | null;
       visitEnd: Date | null;
@@ -354,12 +363,28 @@ export class TripsService {
     }> = cities.map((c) => {
       const row = c.cityIata
         ? byIata.get(c.cityIata.toUpperCase())
-        : byId.get(String(c.cityId));
+        : c.cityId
+        ? byId.get(String(c.cityId))
+        : undefined;
+
       if (!row) {
-        throw new BadRequestException(
-          `존재하지 않는 도시: ${c.cityIata ?? `#${c.cityId}`}`,
-        );
+        // DB 미등록 도시 — customCityName 으로 저장
+        const name = c.customCityName?.trim() ?? null;
+        if (!name) {
+          throw new BadRequestException(
+            `존재하지 않는 도시: ${c.cityIata ?? `#${c.cityId}`}`,
+          );
+        }
+        return {
+          cityId: null,
+          customCityName: name,
+          orderIndex: c.orderIndex,
+          visitStart: c.visitStart ? new Date(c.visitStart) : null,
+          visitEnd: c.visitEnd ? new Date(c.visitEnd) : null,
+          isAutoSynced: c.isAutoSynced ?? false,
+        };
       }
+
       if (row.countryId !== expectedCountryId) {
         this.logger.warn(
           `city ${row.id}(${row.nameEn}) 의 countryId 가 요청 국가와 다릅니다. 허용하되 경고만 기록합니다.`,
@@ -367,6 +392,7 @@ export class TripsService {
       }
       return {
         cityId: row.id,
+        customCityName: null,
         orderIndex: c.orderIndex,
         visitStart: c.visitStart ? new Date(c.visitStart) : null,
         visitEnd: c.visitEnd ? new Date(c.visitEnd) : null,
