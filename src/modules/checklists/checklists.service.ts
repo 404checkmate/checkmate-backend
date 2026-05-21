@@ -334,17 +334,16 @@ export class ChecklistsService {
       categories.find((c) => c.code === 'ai_recommend') ?? categories[0];
 
     const { createdIds, updatedIds } = await this.prisma.$transaction(async (tx) => {
-      // Checklist 보장 (generate 를 돌리지 않은 상태에서도 upsert 가능하도록).
-      let checklist = await tx.checklist.findUnique({ where: { tripId } });
-      if (!checklist) {
-        checklist = await tx.checklist.create({
-          data: {
-            tripId,
-            generatedBy: ChecklistGeneratedBy.template,
-            status: 'not_started',
-          },
-        });
-      }
+      // upsert 로 원자적 생성 — 동시 요청 시 unique constraint 충돌 방지.
+      const checklist = await tx.checklist.upsert({
+        where: { tripId },
+        create: {
+          tripId,
+          generatedBy: ChecklistGeneratedBy.template,
+          status: 'not_started',
+        },
+        update: {},
+      });
 
       const existing = await tx.checklistItem.findMany({
         where: { checklistId: checklist.id, deletedAt: null },

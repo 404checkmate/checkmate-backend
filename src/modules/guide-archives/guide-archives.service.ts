@@ -92,21 +92,17 @@ export class GuideArchivesService {
       throw new ForbiddenException('이 여행에 대한 권한이 없습니다.');
     }
 
-    // Checklist 가 없으면 lazy 생성 (아카이브만 먼저 저장하는 케이스 방어).
-    let checklist = await this.prisma.checklist.findUnique({
+    // upsert 로 원자적 생성 — 동시 요청 시 unique constraint 충돌 방지.
+    const checklist = await this.prisma.checklist.upsert({
       where: { tripId },
+      create: {
+        tripId,
+        generatedBy: ChecklistGeneratedBy.template,
+        status: 'not_started',
+      },
+      update: {},
       select: { id: true },
     });
-    if (!checklist) {
-      checklist = await this.prisma.checklist.create({
-        data: {
-          tripId,
-          generatedBy: ChecklistGeneratedBy.template,
-          status: 'not_started',
-        },
-        select: { id: true },
-      });
-    }
 
     const name = (input.name ?? '보관함 항목').toString().slice(0, 120);
     const snapshot = (input.snapshot ?? {}) as Prisma.InputJsonValue;
