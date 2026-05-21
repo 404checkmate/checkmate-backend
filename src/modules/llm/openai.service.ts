@@ -176,16 +176,33 @@ export class OpenaiService {
   async reclassifyGuideArchiveItems(
     inputs: ReclassifyInputItem[],
   ): Promise<{ items: ReclassifiedItem[]; usage: { tokens: number; model: string } }> {
+    const model = this.config.get<string>('llm.model', 'gpt-4o-mini');
     if (inputs.length === 0) {
-      return {
-        items: [],
-        usage: { tokens: 0, model: this.config.get<string>('llm.model', 'gpt-4o-mini') },
-      };
+      return { items: [], usage: { tokens: 0, model } };
     }
 
-    const model = this.config.get<string>('llm.model', 'gpt-4o-mini');
-    const client = this.getClient();
+    // 항목이 많으면 20개씩 배치로 나눠 호출 — max_tokens 초과로 JSON 잘림 방지
+    const BATCH_SIZE = 20;
+    if (inputs.length > BATCH_SIZE) {
+      const allItems: ReclassifiedItem[] = [];
+      let totalTokens = 0;
+      for (let i = 0; i < inputs.length; i += BATCH_SIZE) {
+        const batch = inputs.slice(i, i + BATCH_SIZE);
+        const result = await this.reclassifySingleBatch(batch, model);
+        allItems.push(...result.items);
+        totalTokens += result.usage.tokens;
+      }
+      return { items: allItems, usage: { tokens: totalTokens, model } };
+    }
 
+    return this.reclassifySingleBatch(inputs, model);
+  }
+
+  private async reclassifySingleBatch(
+    inputs: ReclassifyInputItem[],
+    model: string,
+  ): Promise<{ items: ReclassifiedItem[]; usage: { tokens: number; model: string } }> {
+    const client = this.getClient();
     const systemPrompt = this.buildReclassifySystemPrompt();
     const userPrompt = this.buildReclassifyUserPrompt(inputs);
 
@@ -194,7 +211,7 @@ export class OpenaiService {
     const completion = await client.chat.completions.create({
       model,
       temperature: 0.2,
-      max_tokens: 800,
+      max_tokens: 1500, // 20개 기준 여유있게 설정 (항목당 ~50 토큰)
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: systemPrompt },
@@ -205,7 +222,6 @@ export class OpenaiService {
     const raw = completion.choices[0]?.message?.content ?? '{"items":[]}';
     const parsed = this.safeParseReclassifyResponse(raw);
 
-    // id 가 입력에 존재하는 것만 살리고, category 는 VALID_CATEGORIES 로 정규화.
     const inputIds = new Set(inputs.map((i) => i.id));
     const items = parsed.items
       .filter((row) => row && typeof row.id === 'string' && inputIds.has(row.id))
@@ -234,13 +250,7 @@ export class OpenaiService {
       `[openai:reclassify] done items=${items.length}/${inputs.length} tokens=${completion.usage?.total_tokens ?? 0}`,
     );
 
-    return {
-      items,
-      usage: {
-        tokens: completion.usage?.total_tokens ?? 0,
-        model,
-      },
-    };
+    return { items, usage: { tokens: completion.usage?.total_tokens ?? 0, model } };
   }
 
   // -------------------------------------------------------
