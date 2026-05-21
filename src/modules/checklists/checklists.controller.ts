@@ -124,7 +124,7 @@ export class ChecklistsController {
   @Public()
   @Post('generate-from-context')
   @HttpCode(200)
-  @Throttle({ default: { ttl: 60_000, limit: 5 } })
+  @Throttle({ default: { ttl: 60_000, limit: 20 } })
   generateFromContext(@Body() dto: GenerateFromContextDto) {
     const season = dto.season?.trim()
       ? dto.season
