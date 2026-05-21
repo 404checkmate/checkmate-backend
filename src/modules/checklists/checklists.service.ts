@@ -91,6 +91,8 @@ const OPENAI_GENERATOR = 'openai:recommendAdditionalItems';
 @Injectable()
 export class ChecklistsService {
   private readonly logger = new Logger(ChecklistsService.name);
+  /** 동일 context hash 에 대한 진행 중인 생성 요청을 dedup — 캐시 스탬피드 방지 */
+  private readonly inflightContextRequests = new Map<string, Promise<GeneratedChecklist>>();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -272,22 +274,35 @@ export class ChecklistsService {
     opts?: { tripIdLabel?: string },
   ): Promise<GeneratedChecklist> {
     const hash = this.buildContextHash(context);
+
     const cached = await this.loadContextCache(hash, context);
     if (cached) {
       this.logger.log(`[generateFromContext] cache hit hash=${hash.slice(0, 8)}`);
       return cached;
     }
 
-    const result = await this.buildGeneratedChecklist(context, opts?.tripIdLabel ?? 'context');
-
-    // 캐시 저장 — LLM 항목이 1개 이상일 때만 (template-only 응답은 캐시 가치 없음)
-    if (result.summary.fromLlm > 0) {
-      this.saveContextCache(hash, context, result).catch((err) =>
-        this.logger.warn(`[generateFromContext] cache save failed: ${(err as Error).message}`),
-      );
+    // 동일 hash 요청이 이미 진행 중이면 그 Promise를 공유 (OpenAI 중복 호출 방지)
+    const inflight = this.inflightContextRequests.get(hash);
+    if (inflight) {
+      this.logger.log(`[generateFromContext] dedup hit hash=${hash.slice(0, 8)}`);
+      return inflight;
     }
 
-    return result;
+    const promise = this.buildGeneratedChecklist(context, opts?.tripIdLabel ?? 'context')
+      .then((result) => {
+        if (result.summary.fromLlm > 0) {
+          this.saveContextCache(hash, context, result).catch((err) =>
+            this.logger.warn(`[generateFromContext] cache save failed: ${(err as Error).message}`),
+          );
+        }
+        return result;
+      })
+      .finally(() => {
+        this.inflightContextRequests.delete(hash);
+      });
+
+    this.inflightContextRequests.set(hash, promise);
+    return promise;
   }
 
   private buildContextHash(context: TripContext): string {
