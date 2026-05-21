@@ -501,3 +501,19 @@ model UserEvent {
   @@index([eventType, occurredAt])
   @@map("user_events")
 }
+
+// context 기반 생성 결과 캐시 (tripId 없는 guest/사전 생성용)
+model LlmContextCache {
+  id          BigInt   @id @default(autoincrement())
+  contextHash String   @unique @map("context_hash")
+  context     Json
+  items       Json
+  summary     Json
+  model       String
+  hitCount    Int      @default(0) @map("hit_count")
+  createdAt   DateTime @default(now()) @map("created_at")
+  expiresAt   DateTime @map("expires_at")
+
+  @@index([expiresAt])
+  @@map("llm_context_caches")
+}

@@ -1,4 +1,5 @@
 import { ConflictException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { createHash } from 'crypto';
 import {
   BaggageType,
   CheckAction,
@@ -270,7 +271,93 @@ export class ChecklistsService {
     context: TripContext,
     opts?: { tripIdLabel?: string },
   ): Promise<GeneratedChecklist> {
-    return this.buildGeneratedChecklist(context, opts?.tripIdLabel ?? 'context');
+    const hash = this.buildContextHash(context);
+    const cached = await this.loadContextCache(hash, context);
+    if (cached) {
+      this.logger.log(`[generateFromContext] cache hit hash=${hash.slice(0, 8)}`);
+      return cached;
+    }
+
+    const result = await this.buildGeneratedChecklist(context, opts?.tripIdLabel ?? 'context');
+
+    // 캐시 저장 — LLM 항목이 1개 이상일 때만 (template-only 응답은 캐시 가치 없음)
+    if (result.summary.fromLlm > 0) {
+      this.saveContextCache(hash, context, result).catch((err) =>
+        this.logger.warn(`[generateFromContext] cache save failed: ${(err as Error).message}`),
+      );
+    }
+
+    return result;
+  }
+
+  private buildContextHash(context: TripContext): string {
+    const key = JSON.stringify({
+      d: context.destination.trim().toLowerCase(),
+      days: context.durationDays,
+      s: context.season,
+      c: [...(context.companions ?? [])].sort(),
+      p: [...(context.purposes ?? [])].sort(),
+    });
+    return createHash('sha256').update(key).digest('hex');
+  }
+
+  private async loadContextCache(
+    hash: string,
+    originalContext: TripContext,
+  ): Promise<GeneratedChecklist | null> {
+    try {
+      const row = await this.prisma.llmContextCache.findUnique({ where: { contextHash: hash } });
+      if (!row) return null;
+
+      if (row.expiresAt < new Date()) {
+        this.prisma.llmContextCache.delete({ where: { id: row.id } }).catch(() => {});
+        return null;
+      }
+
+      this.prisma.llmContextCache
+        .update({ where: { id: row.id }, data: { hitCount: { increment: 1 } } })
+        .catch(() => {});
+
+      const items = row.items as unknown as GeneratedChecklistItem[];
+      const summary = row.summary as unknown as GeneratedChecklist['summary'];
+      const sections = await this.groupIntoSections(items);
+
+      return {
+        tripId: 'context',
+        context: originalContext,
+        summary: { ...summary, cacheStatus: 'db-cached' },
+        sections,
+        items,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private async saveContextCache(
+    hash: string,
+    context: TripContext,
+    result: GeneratedChecklist,
+  ): Promise<void> {
+    const CACHE_TTL_MS = 48 * 60 * 60 * 1000; // 48시간
+    await this.prisma.llmContextCache.upsert({
+      where: { contextHash: hash },
+      create: {
+        contextHash: hash,
+        context: context as unknown as Prisma.InputJsonValue,
+        items: result.items as unknown as Prisma.InputJsonValue,
+        summary: result.summary as unknown as Prisma.InputJsonValue,
+        model: result.summary.model ?? 'unknown',
+        expiresAt: new Date(Date.now() + CACHE_TTL_MS),
+      },
+      update: {
+        items: result.items as unknown as Prisma.InputJsonValue,
+        summary: result.summary as unknown as Prisma.InputJsonValue,
+        model: result.summary.model ?? 'unknown',
+        expiresAt: new Date(Date.now() + CACHE_TTL_MS),
+        hitCount: 0,
+      },
+    });
   }
 
   // =========================================================
