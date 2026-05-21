@@ -101,6 +101,52 @@ export class ChecklistsService {
   // =========================================================
 
   /**
+   * 전세계 공통 기본 템플릿 조회 (countryId=null).
+   * 비로그인 엔드포인트(@Public)에서 호출 — 큐레이션 페이지 저장하기 흐름 지원.
+   */
+  async getGlobalTemplates(): Promise<
+    Array<{
+      categoryCode: string;
+      categoryLabel: string;
+      items: Array<{
+        id: string;
+        title: string;
+        prepType: string;
+        baggageType: string;
+        isEssential: boolean;
+      }>;
+    }>
+  > {
+    const templates = await this.prisma.checklistItemTemplate.findMany({
+      where: { countryId: null },
+      include: { category: true },
+      orderBy: [{ category: { sortOrder: 'asc' } }, { id: 'asc' }],
+    });
+
+    const grouped = new Map<string, {
+      categoryCode: string;
+      categoryLabel: string;
+      items: Array<{ id: string; title: string; prepType: string; baggageType: string; isEssential: boolean }>;
+    }>();
+
+    for (const t of templates) {
+      const code = t.category.code;
+      if (!grouped.has(code)) {
+        grouped.set(code, { categoryCode: code, categoryLabel: t.category.labelKo, items: [] });
+      }
+      grouped.get(code)!.items.push({
+        id: t.id.toString(),
+        title: t.title,
+        prepType: t.prepType,
+        baggageType: t.baggageType,
+        isEssential: t.isEssential,
+      });
+    }
+
+    return Array.from(grouped.values());
+  }
+
+  /**
    * "내 체크리스트" 조회 — isSelected=true 인 아이템만 GeneratedChecklist 형태로 반환.
    * 후보 풀 전체(미선택 포함)가 필요하면 listCandidatesForTrip 를 사용.
    */

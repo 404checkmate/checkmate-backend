@@ -34,6 +34,20 @@ export class ChecklistsController {
   constructor(private readonly checklists: ChecklistsService) {}
 
   /**
+   * 전세계 공통 기본 템플릿 목록 조회 (countryId=null).
+   *
+   *   GET /api/checklists/templates/global
+   *   응답: [{ categoryCode, categoryLabel, items: [{ id, title, prepType, baggageType, isEssential }] }]
+   *
+   * 비로그인 허용(@Public) — 큐레이션 페이지 저장하기 흐름에서 사용.
+   */
+  @Public()
+  @Get('templates/global')
+  getGlobalTemplates() {
+    return this.checklists.getGlobalTemplates();
+  }
+
+  /**
    * "내 체크리스트" 조회 — isSelected=true 인 아이템만 포함된 GeneratedChecklist 반환.
    * 후보 풀 전체(미선택 포함)가 필요하면 GET /api/checklists/by-trip/:tripId/candidates 를 사용.
    *
