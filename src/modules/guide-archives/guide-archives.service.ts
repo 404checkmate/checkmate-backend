@@ -92,28 +92,29 @@ export class GuideArchivesService {
       throw new ForbiddenException('이 여행에 대한 권한이 없습니다.');
     }
 
-    // upsert 로 원자적 생성 — 동시 요청 시 unique constraint 충돌 방지.
-    const checklist = await this.prisma.checklist.upsert({
-      where: { tripId },
-      create: {
-        tripId,
-        generatedBy: ChecklistGeneratedBy.template,
-        status: 'not_started',
-      },
-      update: {},
-      select: { id: true },
-    });
-
     const name = (input.name ?? '보관함 항목').toString().slice(0, 120);
     const snapshot = (input.snapshot ?? {}) as Prisma.InputJsonValue;
 
-    const archive = await this.prisma.guideArchive.create({
-      data: {
-        checklistId: checklist.id,
-        name,
-        snapshot,
-        isAiRecommended: input.isAiRecommended ?? false,
-      },
+    const archive = await this.prisma.$transaction(async (tx) => {
+      const checklist = await tx.checklist.upsert({
+        where: { tripId },
+        create: {
+          tripId,
+          generatedBy: ChecklistGeneratedBy.template,
+          status: 'not_started',
+        },
+        update: {},
+        select: { id: true },
+      });
+
+      return tx.guideArchive.create({
+        data: {
+          checklistId: checklist.id,
+          name,
+          snapshot,
+          isAiRecommended: input.isAiRecommended ?? false,
+        },
+      });
     });
 
     this.logger.log(`archive created trip=${tripId} id=${archive.id}`);
