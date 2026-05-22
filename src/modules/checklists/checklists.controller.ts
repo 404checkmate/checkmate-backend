@@ -19,6 +19,7 @@ import {
 } from '../../common/decorators/current-user.decorator';
 import { Public } from '../../common/decorators/public.decorator';
 import { ChecklistsService } from './checklists.service';
+import { ChecklistItemService } from './checklist-item.service';
 import { GenerateFromContextDto } from './dto/generate-from-context.dto';
 import {
   CheckItemDto,
@@ -31,7 +32,10 @@ import { ReclassifyGuideArchiveDto } from './dto/reclassify-guide-archive.dto';
 export class ChecklistsController {
   private readonly logger = new Logger(ChecklistsController.name);
 
-  constructor(private readonly checklists: ChecklistsService) {}
+  constructor(
+    private readonly checklists: ChecklistsService,
+    private readonly checklistItems: ChecklistItemService,
+  ) {}
 
   /**
    * 전세계 공통 기본 템플릿 목록 조회 (countryId=null).
@@ -177,7 +181,7 @@ export class ChecklistsController {
   @Post('items/:itemId/select')
   @HttpCode(200)
   async selectItem(@Param('itemId', ParseIntPipe) itemId: number) {
-    const updated = await this.checklists.selectItem(BigInt(itemId));
+    const updated = await this.checklistItems.selectItem(BigInt(itemId));
     return {
       id: updated.id.toString(),
       isSelected: updated.isSelected,
@@ -193,7 +197,7 @@ export class ChecklistsController {
   @Post('items/:itemId/deselect')
   @HttpCode(200)
   async deselectItem(@Param('itemId', ParseIntPipe) itemId: number) {
-    const updated = await this.checklists.deselectItem(BigInt(itemId));
+    const updated = await this.checklistItems.deselectItem(BigInt(itemId));
     return {
       id: updated.id.toString(),
       isSelected: updated.isSelected,
@@ -213,7 +217,7 @@ export class ChecklistsController {
     this.logger.log(
       `upsertItems trip=${tripId} user=${userId} count=${dto.items.length}`,
     );
-    return this.checklists.upsertItems(BigInt(tripId), userId, dto.items);
+    return this.checklistItems.upsertItems(BigInt(tripId), userId, dto.items);
   }
 
   /** 단일 아이템 편집 (title / description / orderIndex) */
@@ -227,7 +231,7 @@ export class ChecklistsController {
     this.logger.log(
       `editItem item=${itemId} user=${userId} keys=${Object.keys(dto).join(',')}`,
     );
-    return this.checklists.editItem(BigInt(itemId), userId, dto);
+    return this.checklistItems.editItem(BigInt(itemId), userId, dto);
   }
 
   /** 단일 아이템 소프트 삭제 */
@@ -239,7 +243,7 @@ export class ChecklistsController {
   ) {
     const userId = this.requireUserId(user);
     this.logger.log(`deleteItem item=${itemId} user=${userId}`);
-    return this.checklists.deleteItem(BigInt(itemId), userId);
+    return this.checklistItems.deleteItem(BigInt(itemId), userId);
   }
 
   /**
@@ -269,7 +273,7 @@ export class ChecklistsController {
     this.logger.log(
       `reclassifyGuideArchive trip=${dto.tripId ?? '-'} entry=${dto.entryId ?? '-'} user=${userId} count=${dto.items?.length ?? 0}`,
     );
-    return this.checklists.reclassifyGuideArchive(dto.items ?? []);
+    return this.checklistItems.reclassifyGuideArchive(dto.items ?? []);
   }
 
   /** 체크 토글 (checked/unchecked) */
@@ -284,6 +288,6 @@ export class ChecklistsController {
     this.logger.log(
       `checkItem item=${itemId} user=${userId} action=${dto.action}`,
     );
-    return this.checklists.toggleCheck(BigInt(itemId), userId, dto.action);
+    return this.checklistItems.toggleCheck(BigInt(itemId), userId, dto.action);
   }
 }
