@@ -63,6 +63,7 @@ enum PrepType {
   pre_booking
   pre_departure_check
   ai_recommend
+  etc
 }
 
 enum BaggageType {
