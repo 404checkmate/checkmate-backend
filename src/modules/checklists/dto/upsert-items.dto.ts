@@ -12,7 +12,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 
-const PREP_TYPES = ['item', 'pre_booking', 'pre_departure_check', 'ai_recommend'] as const;
+const PREP_TYPES = ['item', 'pre_booking', 'pre_departure_check', 'ai_recommend', 'etc'] as const;
 const BAGGAGE_TYPES = ['carry_on', 'checked', 'none'] as const;
 const SOURCES = ['template', 'llm', 'user_added'] as const;
 
