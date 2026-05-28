@@ -41,6 +41,7 @@ export class AnalyticsService {
   ingestMany(events: IngestEventInput[]) {
     if (events.length === 0) return { count: 0 };
     return this.prisma.userEvent.createMany({
+      skipDuplicates: true,
       data: events.map((e) => ({
         userId: e.userId ?? null,
         tripId: e.tripId ?? null,
