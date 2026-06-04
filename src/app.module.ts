@@ -20,6 +20,7 @@ import { ChecklistsModule } from './modules/checklists/checklists.module';
 import { LlmModule } from './modules/llm/llm.module';
 import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { GuideArchivesModule } from './modules/guide-archives/guide-archives.module';
+import { AdminMetricsModule } from './modules/admin-metrics/admin-metrics.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { GuideArchivesModule } from './modules/guide-archives/guide-archives.mod
     LlmModule,
     AnalyticsModule,
     GuideArchivesModule,
+    AdminMetricsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: SupabaseJwtGuard },

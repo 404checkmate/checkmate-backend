@@ -37,4 +37,16 @@ export default () => ({
     apiKey: process.env.LLM_API_KEY ?? '',
     model: process.env.LLM_MODEL ?? 'gpt-4o-mini',
   },
+  admin: {
+    // 관리자 대시보드(/api/admin/*) 접근 허용 이메일 — 콤마 구분
+    adminEmails: (process.env.ADMIN_EMAILS ?? '')
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean),
+    // 지표 집계에서 제외할 팀원/지인 이메일 — 콤마 구분
+    teamMemberEmails: (process.env.TEAM_MEMBER_EMAILS ?? '')
+      .split(',')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean),
+  },
 });

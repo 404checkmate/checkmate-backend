@@ -1,4 +1,5 @@
 import { Controller, Get, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Public } from '../../common/decorators/public.decorator';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
 import { UsersService } from '../users/users.service';
@@ -7,7 +8,17 @@ import { UsersService } from '../users/users.service';
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
 
-  constructor(private readonly users: UsersService) {}
+  constructor(
+    private readonly users: UsersService,
+    private readonly config: ConfigService,
+  ) {}
+
+  /** ADMIN_EMAILS 허용 목록 기반 관리자 여부 — 프론트 마이페이지 대시보드 버튼 노출에 사용 */
+  private isAdmin(email?: string | null): boolean {
+    if (!email) return false;
+    const adminEmails = this.config.get<string[]>('admin.adminEmails') ?? [];
+    return adminEmails.includes(email.toLowerCase());
+  }
 
   @Public()
   @Get('health')
@@ -33,6 +44,7 @@ export class AuthController {
           supabaseId: user.supabaseId,
           email: user.email,
           provider: user.provider,
+          isAdmin: this.isAdmin(user.email),
           profile: null,
         },
       };
@@ -43,6 +55,7 @@ export class AuthController {
         supabaseId: user.supabaseId,
         email: user.email,
         provider: user.provider,
+        isAdmin: this.isAdmin(user.email),
         profile: profile
           ? {
               id: profile.id,
