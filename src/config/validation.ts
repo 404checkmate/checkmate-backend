@@ -25,6 +25,11 @@ const envSchema = z
     LLM_PROVIDER: z.enum(['openai', 'anthropic', 'gemini']).default('openai'),
     LLM_API_KEY: z.string().optional().or(z.literal('')),
     LLM_MODEL: z.string().default('gpt-4o-mini'),
+
+    // 관리자 대시보드 접근 허용 이메일 (콤마 구분)
+    ADMIN_EMAILS: z.string().optional().or(z.literal('')),
+    // 지표 집계 제외 팀원/지인 이메일 (콤마 구분)
+    TEAM_MEMBER_EMAILS: z.string().optional().or(z.literal('')),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV === 'production' && data.AUTH_DEV_BYPASS === 'true') {
