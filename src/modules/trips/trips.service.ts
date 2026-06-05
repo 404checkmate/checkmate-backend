@@ -42,7 +42,11 @@ export class TripsService {
   // =========================
   listByUser(userId: bigint): Promise<TripDetail[]> {
     return this.prisma.trip.findMany({
-      where: { userId, deletedAt: null },
+      // 내 소유 + 내가 멤버로 합류(수락 완료)한 트립 (공동 편집)
+      where: {
+        deletedAt: null,
+        OR: [{ userId }, { members: { some: { userId, status: 'accepted' } } }],
+      },
       orderBy: { tripStart: 'desc' },
       include: tripDetailInclude,
     });
@@ -54,7 +58,16 @@ export class TripsService {
       include: tripDetailInclude,
     });
     if (!trip) throw new NotFoundException(`Trip ${tripId} not found`);
-    if (trip.userId !== userId) throw new ForbiddenException('조회 권한이 없습니다.');
+    if (trip.userId !== userId) {
+      // 멤버(공동 편집, 수락 완료)면 조회 허용
+      const member = await this.prisma.tripMember.findUnique({
+        where: { tripId_userId: { tripId, userId } },
+        select: { status: true },
+      });
+      if (!member || member.status !== 'accepted') {
+        throw new ForbiddenException('조회 권한이 없습니다.');
+      }
+    }
     return trip;
   }
 

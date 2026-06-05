@@ -32,6 +32,8 @@ export interface GeneratedChecklistItem {
   selectedAt: string | null;
   /** 사용자가 체크(완료)했는지. 후보 풀에서는 의미 없음. */
   isChecked: boolean;
+  /** 마지막으로 편집/체크한 사용자 — 공동 편집 표시용 (getByTrip 에서만 채워짐) */
+  lastActor?: { nickname: string; profileImageUrl: string | null; at: string } | null;
 }
 
 export interface GeneratedChecklist {
@@ -152,12 +154,74 @@ export class ChecklistsService {
       },
     });
     if (!checklist) throw new NotFoundException(`Checklist for trip ${tripId} not found`);
-    return this.buildResponseFromPersisted(
+    const response = await this.buildResponseFromPersisted(
       trip,
       tripId.toString(),
       checklist.items,
       checklist.generatedBy,
     );
+    await this.attachLastActors(response);
+    return response;
+  }
+
+  /**
+   * 아이템별 마지막 수정자(편집/체크 감사 로그의 최신 1건)를 lastActor 로 부착.
+   * 공동 편집 화면에서 "누가 마지막으로 만졌는지" 표시용.
+   */
+  private async attachLastActors(checklist: GeneratedChecklist): Promise<void> {
+    const ids = checklist.items
+      .map((i) => i.id)
+      .filter((v): v is string => v != null)
+      .map((v) => BigInt(v));
+    if (ids.length === 0) return;
+
+    const actorSelect = {
+      itemId: true,
+      occurredAt: true,
+      user: { select: { nickname: true, profileImageUrl: true } },
+    } as const;
+
+    // distinct + (itemId, occurredAt desc) 정렬 → 아이템별 최신 1건
+    const [edits, checks] = await Promise.all([
+      this.prisma.checklistItemEdit.findMany({
+        where: { itemId: { in: ids } },
+        orderBy: [{ itemId: 'asc' }, { occurredAt: 'desc' }],
+        distinct: ['itemId'],
+        select: actorSelect,
+      }),
+      this.prisma.checklistItemCheck.findMany({
+        where: { itemId: { in: ids } },
+        orderBy: [{ itemId: 'asc' }, { occurredAt: 'desc' }],
+        distinct: ['itemId'],
+        select: actorSelect,
+      }),
+    ]);
+
+    const latestByItem = new Map<string, { nickname: string; profileImageUrl: string | null; at: Date }>();
+    for (const row of [...edits, ...checks]) {
+      const key = row.itemId.toString();
+      const prev = latestByItem.get(key);
+      if (!prev || row.occurredAt > prev.at) {
+        latestByItem.set(key, {
+          nickname: row.user.nickname,
+          profileImageUrl: row.user.profileImageUrl,
+          at: row.occurredAt,
+        });
+      }
+    }
+
+    // items 와 sections 는 같은 객체를 참조하지만, 복사본일 가능성까지 대비해 양쪽 순회
+    const allItems = [...checklist.items, ...checklist.sections.flatMap((s) => s.items)];
+    for (const item of allItems) {
+      const actor = item.id ? latestByItem.get(item.id) : undefined;
+      if (actor) {
+        item.lastActor = {
+          nickname: actor.nickname,
+          profileImageUrl: actor.profileImageUrl,
+          at: actor.at.toISOString(),
+        };
+      }
+    }
   }
 
   /**

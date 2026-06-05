@@ -330,6 +330,30 @@ export class AdminMetricsService {
     );
   }
 
+  /** 쿼리 13. 친구·협업 퍼널 — 일별 이벤트 수 (초대→수락) */
+  collab(from: string, to: string) {
+    return this.cached(`collab:${from}:${to}`, () =>
+      this.prisma.$queryRaw`
+        with real_events as (${this.realEventsSql(from, to)})
+        select
+          occurred_at::date::text as day,
+          (count(*) filter (where metadata->>'_ev' = 'friend_invite_created'))::int  as friend_invites,
+          (count(*) filter (where metadata->>'_ev' = 'friend_invite_accepted'))::int as friends_made,
+          (count(*) filter (where metadata->>'_ev' in ('trip_invite_sent', 'trip_invite_link_created')))::int as trip_invites,
+          (count(*) filter (where metadata->>'_ev' = 'trip_invite_accepted'))::int   as trip_joins,
+          (count(*) filter (where metadata->>'_ev' = 'trip_invite_declined'))::int   as trip_declines
+        from real_events
+        where metadata->>'_ev' in (
+          'friend_invite_created', 'friend_invite_accepted',
+          'trip_invite_sent', 'trip_invite_link_created',
+          'trip_invite_accepted', 'trip_invite_declined'
+        )
+        group by 1
+        order by 1
+      `,
+    );
+  }
+
   /** 쿼리 12. 여행 스타일 테스트 결과 유형 분포 (travel_test_completed의 result 메타 기준) */
   travelTestTypes(from: string, to: string) {
     return this.cached(`travelTestTypes:${from}:${to}`, () =>

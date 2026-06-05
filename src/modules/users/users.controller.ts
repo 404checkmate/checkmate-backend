@@ -2,7 +2,9 @@ import {
   BadRequestException,
   Body,
   Controller,
+  Delete,
   Get,
+  HttpCode,
   Logger,
   Param,
   ParseIntPipe,
@@ -10,6 +12,7 @@ import {
   Post,
   UnauthorizedException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { Gender } from '@prisma/client';
 import { UsersService } from './users.service';
 import { CurrentUser, AuthUser } from '../../common/decorators/current-user.decorator';
@@ -21,6 +24,19 @@ export class UsersController {
   private readonly logger = new Logger(UsersController.name);
 
   constructor(private readonly users: UsersService) {}
+
+  /**
+   * 회원탈퇴 — 개인정보 익명화 + 관계 정리 + Supabase auth 삭제.
+   * 프론트는 성공 후 즉시 signOut() 하고 홈으로 이동한다.
+   */
+  @Delete('me')
+  @HttpCode(200)
+  @Throttle({ default: { ttl: 60_000, limit: 3 } })
+  async deleteMe(@CurrentUser() user: AuthUser | undefined) {
+    const userId = this.requireUserId(user);
+    this.logger.log(`[users/me DELETE] user=${userId}`);
+    return this.users.deleteMe(userId, user?.supabaseId ?? null);
+  }
 
   @Get(':id')
   async getOne(
