@@ -290,4 +290,61 @@ export class AdminMetricsService {
       `,
     );
   }
+
+  /** 쿼리 11. 여행 스타일 테스트 퍼널 (진입→시작→완료→결과→공유/체크리스트) */
+  travelTest(from: string, to: string) {
+    return this.cached(`travelTest:${from}:${to}`, () =>
+      this.prisma.$queryRaw`
+        with real_events as (${this.realEventsSql(from, to)}),
+        session_stages as (
+          select
+            session_id,
+            min(occurred_at)::date as day,
+            bool_or(metadata->>'_ev' = 'travel_test_landing_viewed')    as landing_viewed,
+            bool_or(metadata->>'_ev' = 'travel_test_started')           as started,
+            bool_or(metadata->>'_ev' = 'travel_test_completed')         as completed,
+            bool_or(metadata->>'_ev' = 'travel_test_result_viewed'
+                and metadata->>'shared' = 'true')                       as shared_inflow,
+            bool_or(metadata->>'_ev' in ('travel_test_share_link', 'travel_test_share_image')) as shared,
+            bool_or(metadata->>'_ev' = 'travel_test_checklist_create')  as checklist_created
+          from real_events
+          where metadata->>'_ev' like 'travel_test%'
+          group by session_id
+        )
+        select
+          day::text                                          as day,
+          (count(*) filter (where landing_viewed))::int      as landing_viewed,
+          (count(*) filter (where started))::int             as started,
+          (count(*) filter (where completed))::int           as completed,
+          (count(*) filter (where shared))::int              as shared,
+          (count(*) filter (where checklist_created))::int   as checklist_created,
+          (count(*) filter (where shared_inflow))::int       as shared_inflow,
+          round(100.0 * count(*) filter (where completed)
+                / nullif(count(*) filter (where started), 0), 1)::float as start_to_complete_pct,
+          round(100.0 * count(*) filter (where checklist_created)
+                / nullif(count(*) filter (where completed), 0), 1)::float as complete_to_checklist_pct
+        from session_stages
+        group by day
+        order by day
+      `,
+    );
+  }
+
+  /** 쿼리 12. 여행 스타일 테스트 결과 유형 분포 (travel_test_completed의 result 메타 기준) */
+  travelTestTypes(from: string, to: string) {
+    return this.cached(`travelTestTypes:${from}:${to}`, () =>
+      this.prisma.$queryRaw`
+        with real_events as (${this.realEventsSql(from, to)})
+        select
+          metadata->>'result'                                       as result_type,
+          count(*)::int                                             as cnt,
+          round(100.0 * count(*) / sum(count(*)) over (), 1)::float as pct
+        from real_events
+        where metadata->>'_ev' = 'travel_test_completed'
+          and metadata->>'result' is not null
+        group by 1
+        order by cnt desc
+      `,
+    );
+  }
 }
