@@ -64,4 +64,16 @@ export class AdminMetricsController {
     const r = resolveRange(from, to);
     return this.metrics.guestPreview(r.from, r.to);
   }
+
+  @Get('travel-test')
+  travelTest(@Query('from') from?: string, @Query('to') to?: string) {
+    const r = resolveRange(from, to);
+    return this.metrics.travelTest(r.from, r.to);
+  }
+
+  @Get('travel-test-types')
+  travelTestTypes(@Query('from') from?: string, @Query('to') to?: string) {
+    const r = resolveRange(from, to);
+    return this.metrics.travelTestTypes(r.from, r.to);
+  }
 }
