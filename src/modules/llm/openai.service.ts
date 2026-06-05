@@ -97,12 +97,13 @@ export class OpenaiService {
    */
   async recommendAdditionalItems(
     context: TripContext,
+    existingTitles: string[] = [],
   ): Promise<{ items: AdditionalItem[]; usage: { tokens: number; model: string } }> {
     const model = this.config.get<string>('llm.model', 'gpt-4o-mini');
     const client = this.getClient();
 
     const systemPrompt = this.buildSystemPrompt();
-    const userPrompt = this.buildUserPrompt(context);
+    const userPrompt = this.buildUserPrompt(context, existingTitles);
 
     this.logger.log(`[openai] request model=${model} destination=${context.destination}`);
 
@@ -274,6 +275,12 @@ export class OpenaiService {
 스킨/로션/자외선차단제, 휴지/물티슈/우산/비닐봉투,
 항공권예약/숙소예약/여행자보험/환전/여권만료일확인/온라인체크인
 
+[중요] 위 금지 목록과 "같은 목적·유사 기능"인 변형 표현도 전부 금지입니다.
+예) 소화제 → 소화 보조제·정장제·유산균제 ❌ | 밴드 → 반창고·습윤밴드 ❌ | 충전기 → 충전 케이블 ❌ | 자외선차단제 → 선크림·선스틱 ❌
+"추가분·여분·예비·휴대용·미니" 등을 붙인 변형도 금지입니다. 예) 소화 보조제 추가분 ❌, 여분 충전기 ❌
+user 메시지에 [이미 포함된 항목] 목록이 오면 그것과도 동일하게 대조하세요.
+출력 직전에 각 항목을 금지 목록·이미 포함된 항목과 의미 단위로 대조해, 겹치면 그 항목을 제외하고 출력하세요.
+
 [검토 영역 — 해당하는 것만 포함]
 1. 현지 결제수단 — QR결제앱(알리페이/WeChat/PromptPay/GCash 등), 수수료 우대 카드(트래블월렛·트래블로그 등), ATM
 2. 이동수단 — 택시앱(Grab/Gojek/DiDi/Uber/Lyft 등), 교통카드, 특수 교통수단(뚝뚝·썽태우 등), 국제면허
@@ -306,7 +313,7 @@ baggage_type: carry_on | checked | none
    * 여행 컨텍스트 + 조건부 힌트(날씨/VPN/비자/스타일/동행/맛집앱)를 포함한다.
    * 시스템 프롬프트에서 반복되는 정보는 제거해 총 토큰을 최소화한다.
    */
-  private buildUserPrompt(ctx: TripContext): string {
+  private buildUserPrompt(ctx: TripContext, existingTitles: string[] = []): string {
     const companions = ctx.companions.length ? ctx.companions.join(', ') : '혼자';
     const purposes = ctx.purposes.length ? ctx.purposes.join(', ') : '일반 관광';
 
@@ -318,6 +325,15 @@ baggage_type: carry_on | checked | none
       `동행: ${companions}`,
       `여행 스타일: ${purposes}`,
     ];
+
+    // 실제 DB 템플릿 항목을 그대로 전달 — 하드코딩 금지 목록과의 drift 방지
+    if (existingTitles.length > 0) {
+      lines.push(
+        '',
+        '[이미 포함된 항목 — 이것들과 같거나 유사한 목적의 항목은 절대 추천 금지]',
+        existingTitles.join(', '),
+      );
+    }
 
     const weatherHint = this.buildWeatherHint(ctx);
     if (weatherHint) lines.push('', '[기후 힌트]', weatherHint);
