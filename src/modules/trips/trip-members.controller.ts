@@ -7,10 +7,11 @@ import {
   HttpCode,
   Param,
   ParseIntPipe,
+  Patch,
   Post,
   UnauthorizedException,
 } from '@nestjs/common';
-import { IsNumberString } from 'class-validator';
+import { IsIn, IsNumberString } from 'class-validator';
 import { Throttle } from '@nestjs/throttler';
 import {
   AuthUser,
@@ -22,6 +23,11 @@ import { TripMembersService } from './trip-members.service';
 class AddTripMemberDto {
   @IsNumberString()
   userId!: string;
+}
+
+class RespondTripInviteDto {
+  @IsIn(['accept', 'decline'])
+  action!: 'accept' | 'decline';
 }
 
 /**
@@ -60,6 +66,26 @@ export class TripMembersController {
   @Get('invites/:token')
   previewInvite(@Param('token') token: string) {
     return this.tripMembers.previewInvite(token);
+  }
+
+  /** 내가 받은 트립 초대(수락 대기) 목록 — 보관함 상단 배너용
+   *  주의: 정적 세그먼트라 `:tripId/members` 보다 먼저 선언해야 함 */
+  @Get('member-invites/received')
+  listReceivedInvites(@CurrentUser() user: AuthUser | undefined) {
+    const userId = this.requireUserId(user);
+    return this.tripMembers.listReceivedInvites(userId);
+  }
+
+  /** 받은 초대 응답 — Body: { action: 'accept' | 'decline' } */
+  @Patch(':tripId/members/me')
+  @HttpCode(200)
+  respondInvite(
+    @CurrentUser() user: AuthUser | undefined,
+    @Param('tripId', ParseIntPipe) tripId: number,
+    @Body() dto: RespondTripInviteDto,
+  ) {
+    const userId = this.requireUserId(user);
+    return this.tripMembers.respondInvite(BigInt(tripId), userId, dto.action);
   }
 
   @Post('invites/:token/accept')

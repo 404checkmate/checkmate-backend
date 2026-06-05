@@ -7,6 +7,7 @@ import {
 import { randomBytes } from 'crypto';
 import { FriendshipStatus } from '@prisma/client';
 import { PrismaService } from '../../infra/prisma/prisma.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 const INVITE_TTL_DAYS = 7;
 const INVITE_MAX_USES = 10;
@@ -38,7 +39,10 @@ function serializeFriend(u: {
 export class FriendsService {
   private readonly logger = new Logger(FriendsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   /** 내 친구 초대 링크 생성 (7일 / 10회) */
   async createInvite(userId: bigint) {
@@ -127,6 +131,12 @@ export class FriendsService {
     ]);
 
     this.logger.log(`friend accepted creator=${invite.creatorId} user=${userId}`);
+    // 링크 생성자에게 "친구가 됐어요" 알림 (fire-and-forget)
+    void this.notifications.notify({
+      userId: invite.creatorId,
+      type: 'friend_accepted',
+      actorId: userId,
+    });
     return { ok: true as const, alreadyFriends: false, friend: serializeFriend(creator) };
   }
 

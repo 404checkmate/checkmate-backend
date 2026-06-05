@@ -42,10 +42,10 @@ export class GuideArchivesService {
     const archives = await this.prisma.guideArchive.findMany({
       where: {
         checklist: {
-          // 내 소유 트립 + 내가 멤버로 합류한 트립 (공동 편집)
+          // 내 소유 트립 + 내가 멤버로 합류(수락 완료)한 트립 (공동 편집)
           trip: {
             deletedAt: null,
-            OR: [{ userId }, { members: { some: { userId } } }],
+            OR: [{ userId }, { members: { some: { userId, status: 'accepted' } } }],
           },
         },
       },
@@ -65,6 +65,16 @@ export class GuideArchivesService {
                 title: true,
                 tripStart: true,
                 tripEnd: true,
+                userId: true,
+                user: { select: { nickname: true, profileImageUrl: true } },
+                members: {
+                  where: { status: 'accepted' }, // 수락 대기 중인 초대는 공유 표시에서 제외
+                  select: {
+                    userId: true,
+                    user: { select: { nickname: true, profileImageUrl: true, deletedAt: true } },
+                  },
+                  orderBy: { joinedAt: 'asc' },
+                },
               },
             },
           },
@@ -73,21 +83,49 @@ export class GuideArchivesService {
       orderBy: { archivedAt: 'desc' },
     });
 
-    return archives.map((a) => ({
-      id: a.id.toString(),
-      name: a.name,
-      archivedAt: a.archivedAt.toISOString(),
-      isAiRecommended: a.isAiRecommended,
-      snapshot: a.snapshot,
-      checklistStatus: a.checklist.status,
-      completionRate: Number(a.checklist.completionRate),
-      trip: {
-        id: a.checklist.trip.id.toString(),
-        title: a.checklist.trip.title,
-        tripStart: a.checklist.trip.tripStart,
-        tripEnd: a.checklist.trip.tripEnd,
-      },
-    }));
+    return archives.map((a) => {
+      const trip = a.checklist.trip;
+      const members = trip.members.filter((m) => !m.user.deletedAt);
+      const isShared = members.length > 0;
+      const isOwner = trip.userId === userId;
+      // 나를 제외한 참여자(소유자 포함) 미리보기 — 카드 아바타 스택용
+      const othersPool = [
+        { userId: trip.userId, nickname: trip.user.nickname, profileImageUrl: trip.user.profileImageUrl },
+        ...members.map((m) => ({
+          userId: m.userId,
+          nickname: m.user.nickname,
+          profileImageUrl: m.user.profileImageUrl,
+        })),
+      ].filter((p) => p.userId !== userId);
+
+      return {
+        id: a.id.toString(),
+        name: a.name,
+        archivedAt: a.archivedAt.toISOString(),
+        isAiRecommended: a.isAiRecommended,
+        snapshot: a.snapshot,
+        checklistStatus: a.checklist.status,
+        completionRate: Number(a.checklist.completionRate),
+        trip: {
+          id: trip.id.toString(),
+          title: trip.title,
+          tripStart: trip.tripStart,
+          tripEnd: trip.tripEnd,
+        },
+        // 공동 편집 메타 — 공유 중이 아니면 null
+        shared: isShared
+          ? {
+              isOwner,
+              memberCount: members.length + 1, // 소유자 포함
+              ownerNickname: trip.user.nickname,
+              others: othersPool.slice(0, 3).map(({ nickname, profileImageUrl }) => ({
+                nickname,
+                profileImageUrl,
+              })),
+            }
+          : null,
+      };
+    });
   }
 
   async createForTrip(tripId: bigint, userId: bigint, input: { name?: string; snapshot?: unknown; isAiRecommended?: boolean }) {

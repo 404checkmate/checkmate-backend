@@ -150,6 +150,8 @@ model User {
   friendshipsReceived  Friendship[]   @relation("FriendshipAddressee")
   friendInvites        FriendInvite[]
   tripMemberships      TripMember[]   @relation("TripMemberUser")
+  notifications        Notification[] @relation("NotificationUser")
+  notificationActions  Notification[] @relation("NotificationActor")
 
   @@index([deletedAt])
   @@map("users")
@@ -337,20 +339,58 @@ enum TripMemberRole {
   editor
 }
 
+enum TripMemberStatus {
+  pending // 친구 바로 추가 = 초대장 — 상대 수락 전
+  accepted // 멤버 (초대 링크 합류는 즉시 accepted)
+  declined
+}
+
 model TripMember {
-  id        BigInt         @id @default(autoincrement())
-  tripId    BigInt         @map("trip_id")
-  userId    BigInt         @map("user_id")
-  role      TripMemberRole @default(editor)
-  invitedBy BigInt?        @map("invited_by")
-  joinedAt  DateTime       @default(now()) @map("joined_at")
+  id          BigInt           @id @default(autoincrement())
+  tripId      BigInt           @map("trip_id")
+  userId      BigInt           @map("user_id")
+  role        TripMemberRole   @default(editor)
+  status      TripMemberStatus @default(accepted)
+  invitedBy   BigInt?          @map("invited_by")
+  joinedAt    DateTime         @default(now()) @map("joined_at")
+  respondedAt DateTime?        @map("responded_at")
 
   trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
   user User @relation("TripMemberUser", fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([tripId, userId])
   @@index([userId])
+  @@index([userId, status])
   @@map("trip_members")
+}
+
+// =========================================================
+// NOTIFICATION DOMAIN (docs/collab-checklist-plan.md Phase 4)
+// =========================================================
+
+enum NotificationType {
+  trip_invite          // 트립 초대 받음 (수신자 = 초대 대상)
+  trip_invite_accepted // 내가 보낸 트립 초대가 수락됨 (수신자 = 초대한 사람)
+  trip_member_joined   // 초대 링크로 멤버 합류 (수신자 = 트립 소유자)
+  friend_accepted      // 내 친구 초대 링크가 수락됨 (수신자 = 링크 생성자)
+}
+
+model Notification {
+  id        BigInt           @id @default(autoincrement())
+  userId    BigInt           @map("user_id") // 수신자
+  type      NotificationType
+  actorId   BigInt?          @map("actor_id") // 행동 주체 (탈퇴 시 null)
+  tripId    BigInt?          @map("trip_id")
+  payload   Json? // { tripTitle, archiveId 등 표시용 스냅샷 }
+  readAt    DateTime?        @map("read_at")
+  createdAt DateTime         @default(now()) @map("created_at")
+
+  user  User  @relation("NotificationUser", fields: [userId], references: [id], onDelete: Cascade)
+  actor User? @relation("NotificationActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+  @@map("notifications")
 }
 
 // 트립 합류 초대 링크 토큰 — /trips/invite/:token 으로 공유

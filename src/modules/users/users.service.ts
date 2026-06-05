@@ -1,7 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { AuthProvider, User } from '@prisma/client';
+import { AuthProvider, Gender, User } from '@prisma/client';
 import { createHash } from 'crypto';
 import { PrismaService } from '../../infra/prisma/prisma.service';
+import { SupabaseService } from '../../infra/supabase/supabase.service';
 import type { AuthProviderName } from '../../common/decorators/current-user.decorator';
 
 export interface SocialLoginIdentity {
@@ -17,7 +18,76 @@ export interface SocialLoginIdentity {
 export class UsersService {
   private readonly logger = new Logger(UsersService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly supabase: SupabaseService,
+  ) {}
+
+  /**
+   * 회원탈퇴 — 개인정보 익명화(소프트 삭제) + 관계 데이터 정리 + Supabase auth 계정 삭제.
+   *
+   * - 내 트립은 소프트 삭제 (멤버였던 친구들도 접근 불가)
+   * - 친구 관계/초대, 트립 멤버십/초대는 하드 삭제
+   * - email 은 unique 충돌 방지를 위해 치환 (재가입 시 새 계정 생성)
+   * - 분석 이벤트(user_events)는 서비스 통계용으로 비식별 상태 유지
+   */
+  async deleteMe(userId: bigint, supabaseId: string | null) {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!user) throw new NotFoundException('이미 탈퇴했거나 존재하지 않는 계정입니다.');
+
+    const now = new Date();
+    await this.prisma.$transaction([
+      // 친구 도메인 정리
+      this.prisma.friendship.deleteMany({
+        where: { OR: [{ requesterId: userId }, { addresseeId: userId }] },
+      }),
+      this.prisma.friendInvite.deleteMany({ where: { creatorId: userId } }),
+      // 공동 편집 도메인 정리 — 내가 멤버인 행 + 내 트립에 붙은 멤버/초대
+      this.prisma.tripMember.deleteMany({
+        where: { OR: [{ userId }, { trip: { userId } }] },
+      }),
+      this.prisma.tripInvite.deleteMany({
+        where: { OR: [{ createdBy: userId }, { trip: { userId } }] },
+      }),
+      // 내 트립 소프트 삭제
+      this.prisma.trip.updateMany({
+        where: { userId, deletedAt: null },
+        data: { deletedAt: now },
+      }),
+      // 소셜 로그인 연결 제거 (재로그인 시 새 계정으로 프로비저닝)
+      this.prisma.userAuthProvider.deleteMany({ where: { userId } }),
+      // 개인정보 익명화 + 소프트 삭제
+      this.prisma.user.update({
+        where: { id: userId },
+        data: {
+          deletedAt: now,
+          email: `deleted_${userId}@removed.checkmate`,
+          nickname: '탈퇴한 사용자',
+          profileImageUrl: null,
+          gender: Gender.unknown,
+          birthDate: null,
+          marketingOptIn: false,
+        },
+      }),
+    ]);
+
+    // Supabase auth 계정 삭제 — 실패해도 DB 익명화는 완료된 상태라 경고만 남김
+    if (supabaseId) {
+      try {
+        await this.supabase.admin.auth.admin.deleteUser(supabaseId);
+      } catch (err) {
+        this.logger.warn(
+          `[deleteMe] supabase auth 삭제 실패 user=${userId} sub=${supabaseId}: ${(err as Error)?.message}`,
+        );
+      }
+    }
+
+    this.logger.log(`user deleted (anonymized) id=${userId}`);
+    return { ok: true as const, message: '탈퇴가 완료되었습니다.' };
+  }
 
   findById(id: bigint) {
     return this.prisma.user.findFirst({

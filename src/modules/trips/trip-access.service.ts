@@ -40,9 +40,10 @@ export class TripAccessService {
 
     const member = await this.prisma.tripMember.findUnique({
       where: { tripId_userId: { tripId, userId } },
-      select: { role: true },
+      select: { role: true, status: true },
     });
-    if (!member) {
+    if (!member || member.status !== 'accepted') {
+      // pending(수락 전)/declined 는 멤버가 아님
       throw new ForbiddenException('이 여행에 대한 권한이 없습니다.');
     }
     return { ...trip, role: 'editor' };
@@ -68,9 +69,9 @@ export class TripAccessService {
     if (trip.userId !== userId) {
       const member = await this.prisma.tripMember.findUnique({
         where: { tripId_userId: { tripId: trip.id, userId } },
-        select: { id: true },
+        select: { status: true },
       });
-      if (!member) {
+      if (!member || member.status !== 'accepted') {
         throw new ForbiddenException('이 여행에 대한 권한이 없습니다.');
       }
     }

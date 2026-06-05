@@ -76,4 +76,10 @@ export class AdminMetricsController {
     const r = resolveRange(from, to);
     return this.metrics.travelTestTypes(r.from, r.to);
   }
+
+  @Get('collab')
+  collab(@Query('from') from?: string, @Query('to') to?: string) {
+    const r = resolveRange(from, to);
+    return this.metrics.collab(r.from, r.to);
+  }
 }

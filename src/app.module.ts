@@ -22,6 +22,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module';
 import { GuideArchivesModule } from './modules/guide-archives/guide-archives.module';
 import { AdminMetricsModule } from './modules/admin-metrics/admin-metrics.module';
 import { FriendsModule } from './modules/friends/friends.module';
+import { NotificationsModule } from './modules/notifications/notifications.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { FriendsModule } from './modules/friends/friends.module';
     GuideArchivesModule,
     AdminMetricsModule,
     FriendsModule,
+    NotificationsModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: SupabaseJwtGuard },
