@@ -446,7 +446,10 @@ export class ChecklistsService {
       const categories = await this.prisma.checklistCategory.findMany();
       const categoryByCode = new Map(categories.map((c) => [c.code, c]));
 
-      const { items, usage } = await this.openai.recommendAdditionalItems(context);
+      const { items, usage } = await this.openai.recommendAdditionalItems(
+        context,
+        templateItems.map((t) => t.title), // 실제 템플릿 목록 전달 — 중복 추천 회피
+      );
       llmUsage = usage;
       llmItems = items.map((raw, idx) => {
         const category = categoryByCode.get(raw.category) ?? categoryByCode.get('ai_recommend');
@@ -472,7 +475,7 @@ export class ChecklistsService {
       );
     }
 
-    // --- 3) 중복 제거 (template 우선, LLM 은 같은 title 이면 버림) ---
+    // --- 3) 중복 제거 (template 우선, LLM 은 같거나 "유사한" title 이면 버림) ---
     const seen = new Set<string>();
     const merged: GeneratedChecklistItem[] = [];
     let duplicatesRemoved = 0;
@@ -488,7 +491,16 @@ export class ChecklistsService {
     };
 
     templateItems.forEach(pushIfUnique);
-    llmItems.forEach(pushIfUnique);
+    // LLM 항목은 완전 일치 외에 변형 표현(소화제→소화 보조제 등)도 차단
+    llmItems.forEach((item) => {
+      const key = this.normalizeTitle(item.title);
+      if (seen.has(key) || this.isVariantOfExisting(key, seen)) {
+        duplicatesRemoved += 1;
+        return;
+      }
+      seen.add(key);
+      merged.push(item);
+    });
 
     // orderIndex 를 전역적으로 재부여 (섹션 구분과 무관한 글로벌 순서 확정).
     merged.forEach((m, idx) => {
@@ -739,6 +751,67 @@ export class ChecklistsService {
       .toLowerCase()
       .replace(/\s+/g, '')
       .replace(/[.,/·\-()[\]{}]/g, '');
+  }
+
+  /** "다른 물건"으로 인정하는 접미사 — 본체와 액세서리 구분 (예: 여권 vs 여권 케이스) */
+  private static readonly DEDUP_ACCESSORY_SUFFIXES = [
+    '케이스', '커버', '지갑', '파우치', '홀더', '스트랩', '가방', '주머니', '목걸이',
+  ];
+
+  /** 비교 전에 제거하는 수식어 — "소화 보조제 추가분" → "소화보조제" */
+  private static readonly DEDUP_MODIFIERS = ['추가분', '여분', '예비', '휴대용', '미니', '세트', '추가'];
+
+  /**
+   * 시스템 프롬프트의 [절대 추천 금지] 목록과 같은 근거의 어간(stem).
+   * LLM 항목 제목에 이 어간이 포함되면 기본 준비물과 같은 목적으로 보고 드랍한다.
+   * ("소화보조제"처럼 비연속 변형이라 부분 포함 검사로 못 잡는 케이스 방어)
+   */
+  private static readonly DEDUP_BANNED_STEMS = [
+    '소화', '감기', '해열', '지사', '멀미', '연고', '밴드', '반창고',
+    '선크림', '선스틱', '자외선차단', '충전', '보조배터리', '멀티어댑터',
+    '칫솔', '치약', '샴푸', '여권', '환전', '여행자보험',
+  ];
+
+  /**
+   * LLM 항목의 유사 중복 판정 — 정규화 키 기준으로 한쪽이 다른 쪽을 포함하면 같은 항목.
+   * 예) "소화보조제" ⊃ "소화제" → 중복.
+   * 오탐 가드:
+   *   - 포함당하는 키가 3글자 미만이면 검사 제외 ("약" ⊂ "감기약" 같은 과잉 매칭 방지)
+   *   - 나머지 문자열이 액세서리 접미사면 다른 물건으로 인정 ("여권케이스" ⊅ "여권")
+   */
+  private isVariantOfExisting(key: string, seenKeys: Set<string>): boolean {
+    // 0) 수식어 제거 ("소화보조제추가분" → "소화보조제")
+    let stripped = key;
+    for (const m of ChecklistsService.DEDUP_MODIFIERS) {
+      stripped = stripped.replaceAll(m, '');
+    }
+
+    // 1) 금지 어간 — 기본 준비물과 같은 목적이면 드랍 (비연속 변형까지 방어)
+    //    단, 액세서리 접미사가 붙은 형태(여권 케이스 등)는 다른 물건으로 인정
+    const hasAccessorySuffix = ChecklistsService.DEDUP_ACCESSORY_SUFFIXES.some((s) =>
+      stripped.includes(s),
+    );
+    if (!hasAccessorySuffix) {
+      if (ChecklistsService.DEDUP_BANNED_STEMS.some((stem) => stripped.includes(stem))) {
+        return true;
+      }
+    }
+
+    // 2) 기존 키와의 부분 포함 검사 (소화보조제 ⊃ 소화제 류의 연속 변형)
+    for (const existing of seenKeys) {
+      const [shorter, longer] =
+        existing.length <= stripped.length ? [existing, stripped] : [stripped, existing];
+      if (shorter.length < 3) continue;
+      if (!longer.includes(shorter)) continue;
+      const remainder = longer.replace(shorter, '');
+      if (
+        ChecklistsService.DEDUP_ACCESSORY_SUFFIXES.some((s) => remainder.includes(s))
+      ) {
+        continue;
+      }
+      return true;
+    }
+    return false;
   }
 
   /** DB 의 ChecklistItemTemplate(countryId=null 공통분) 을 GeneratedChecklistItem 형태로 로드. */
