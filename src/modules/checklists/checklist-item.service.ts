@@ -1,6 +1,5 @@
 import {
   ConflictException,
-  ForbiddenException,
   Injectable,
   Logger,
   NotFoundException,
@@ -16,6 +15,7 @@ import {
   PrepType,
 } from '@prisma/client';
 import { PrismaService } from '../../infra/prisma/prisma.service';
+import { TripAccessService } from '../trips/trip-access.service';
 import {
   OpenaiService,
   ReclassifyInputItem,
@@ -35,17 +35,15 @@ export class ChecklistItemService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly openai: OpenaiService,
+    private readonly tripAccess: TripAccessService,
   ) {}
 
   // =========================================================
   // SELECT / DESELECT (candidate pool → my checklist)
   // =========================================================
 
-  async selectItem(itemId: bigint): Promise<PersistedChecklistItem> {
-    const item = await this.prisma.checklistItem.findFirst({
-      where: { id: itemId, deletedAt: null },
-    });
-    if (!item) throw new NotFoundException(`ChecklistItem ${itemId} not found`);
+  async selectItem(itemId: bigint, userId: bigint): Promise<PersistedChecklistItem> {
+    await this.tripAccess.assertItemAccess(itemId, userId);
     return this.prisma.checklistItem.update({
       where: { id: itemId },
       data: { isSelected: true, selectedAt: new Date() },
@@ -53,11 +51,8 @@ export class ChecklistItemService {
     });
   }
 
-  async deselectItem(itemId: bigint): Promise<PersistedChecklistItem> {
-    const item = await this.prisma.checklistItem.findFirst({
-      where: { id: itemId, deletedAt: null },
-    });
-    if (!item) throw new NotFoundException(`ChecklistItem ${itemId} not found`);
+  async deselectItem(itemId: bigint, userId: bigint): Promise<PersistedChecklistItem> {
+    await this.tripAccess.assertItemAccess(itemId, userId);
     return this.prisma.checklistItem.update({
       where: { id: itemId },
       data: { isSelected: false, selectedAt: null },
@@ -70,11 +65,7 @@ export class ChecklistItemService {
   // =========================================================
 
   async upsertItems(tripId: bigint, userId: bigint, items: UpsertItemDto[]) {
-    const trip = await this.prisma.trip.findFirst({
-      where: { id: tripId, deletedAt: null },
-      select: { id: true },
-    });
-    if (!trip) throw new NotFoundException(`Trip ${tripId} not found`);
+    await this.tripAccess.assertTripAccess(tripId, userId);
 
     const categories = await this.prisma.checklistCategory.findMany();
     const categoryIdByCode = new Map(categories.map((c) => [c.code, c.id]));
@@ -244,6 +235,7 @@ export class ChecklistItemService {
   }
 
   async editItem(itemId: bigint, userId: bigint, patch: EditItemDto) {
+    await this.tripAccess.assertItemAccess(itemId, userId);
     const item = await this.prisma.checklistItem.findFirst({
       where: { id: itemId, deletedAt: null },
       include: { category: true },
@@ -335,14 +327,8 @@ export class ChecklistItemService {
   }
 
   async deleteItem(itemId: bigint, userId: bigint) {
-    const item = await this.prisma.checklistItem.findFirst({
-      where: { id: itemId, deletedAt: null },
-      include: { checklist: { include: { trip: { select: { userId: true } } } } },
-    });
-    if (!item) throw new NotFoundException('항목을 찾을 수 없습니다.');
-    if (item.checklist.trip.userId !== userId) {
-      throw new ForbiddenException('삭제 권한이 없습니다.');
-    }
+    // 권한 검사 중앙화 — TripMember 도입 시 TripAccessService만 확장하면 됨
+    const item = await this.tripAccess.assertItemAccess(itemId, userId);
 
     const now = new Date();
     await this.prisma.$transaction([
@@ -375,10 +361,7 @@ export class ChecklistItemService {
   }
 
   async toggleCheck(itemId: bigint, userId: bigint, action: 'checked' | 'unchecked') {
-    const item = await this.prisma.checklistItem.findFirst({
-      where: { id: itemId, deletedAt: null },
-    });
-    if (!item) throw new NotFoundException(`ChecklistItem ${itemId} not found`);
+    const item = await this.tripAccess.assertItemAccess(itemId, userId);
 
     const now = new Date();
     const desired = action === 'checked';

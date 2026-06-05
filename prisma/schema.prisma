@@ -146,8 +146,56 @@ model User {
   itemEdits     ChecklistItemEdit[]
   itemChecks    ChecklistItemCheck[]
 
+  friendshipsRequested Friendship[]   @relation("FriendshipRequester")
+  friendshipsReceived  Friendship[]   @relation("FriendshipAddressee")
+  friendInvites        FriendInvite[]
+  tripMemberships      TripMember[]   @relation("TripMemberUser")
+
   @@index([deletedAt])
   @@map("users")
+}
+
+// =========================================================
+// FRIEND DOMAIN (docs/collab-checklist-plan.md Phase 1)
+// =========================================================
+
+enum FriendshipStatus {
+  pending // 이메일 요청 방식 확장 대비 (초대 링크 수락은 바로 accepted)
+  accepted
+  declined
+  blocked
+}
+
+model Friendship {
+  id          BigInt           @id @default(autoincrement())
+  requesterId BigInt           @map("requester_id")
+  addresseeId BigInt           @map("addressee_id")
+  status      FriendshipStatus @default(pending)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  respondedAt DateTime?        @map("responded_at")
+
+  requester User @relation("FriendshipRequester", fields: [requesterId], references: [id], onDelete: Cascade)
+  addressee User @relation("FriendshipAddressee", fields: [addresseeId], references: [id], onDelete: Cascade)
+
+  @@unique([requesterId, addresseeId])
+  @@index([addresseeId, status])
+  @@map("friendships")
+}
+
+// 친구 초대 링크 토큰 — /friends/invite/:token 으로 공유
+model FriendInvite {
+  id        BigInt   @id @default(autoincrement())
+  token     String   @unique
+  creatorId BigInt   @map("creator_id")
+  expiresAt DateTime @map("expires_at")
+  maxUses   Int      @default(10) @map("max_uses")
+  usedCount Int      @default(0) @map("used_count")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  creator User @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([creatorId])
+  @@map("friend_invites")
 }
 
 model UserAuthProvider {
@@ -271,10 +319,55 @@ model Trip {
   checklist      Checklist?
   llmGenerations LlmGeneration[]
   events         UserEvent[]
+  members        TripMember[]
+  invites        TripInvite[]
 
   @@index([userId, status])
   @@index([deletedAt])
   @@map("trips")
+}
+
+// =========================================================
+// TRIP MEMBER DOMAIN — 체크리스트 공동 편집 (docs/collab-checklist-plan.md Phase 2)
+// 소유자는 Trip.userId 로 표현하며 TripMember 행을 따로 만들지 않는다.
+// =========================================================
+
+enum TripMemberRole {
+  owner // 예약 — 현재는 Trip.userId가 소유자, viewer 등 확장 대비
+  editor
+}
+
+model TripMember {
+  id        BigInt         @id @default(autoincrement())
+  tripId    BigInt         @map("trip_id")
+  userId    BigInt         @map("user_id")
+  role      TripMemberRole @default(editor)
+  invitedBy BigInt?        @map("invited_by")
+  joinedAt  DateTime       @default(now()) @map("joined_at")
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  user User @relation("TripMemberUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tripId, userId])
+  @@index([userId])
+  @@map("trip_members")
+}
+
+// 트립 합류 초대 링크 토큰 — /trips/invite/:token 으로 공유
+model TripInvite {
+  id        BigInt   @id @default(autoincrement())
+  tripId    BigInt   @map("trip_id")
+  token     String   @unique
+  createdBy BigInt   @map("created_by")
+  expiresAt DateTime @map("expires_at")
+  maxUses   Int      @default(10) @map("max_uses")
+  usedCount Int      @default(0) @map("used_count")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  trip Trip @relation(fields: [tripId], references: [id], onDelete: Cascade)
+
+  @@index([tripId])
+  @@map("trip_invites")
 }
 
 model TripCity {

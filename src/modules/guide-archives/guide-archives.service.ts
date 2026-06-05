@@ -1,6 +1,7 @@
-import { ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ChecklistGeneratedBy, Prisma } from '@prisma/client';
 import { PrismaService } from '../../infra/prisma/prisma.service';
+import { TripAccessService } from '../trips/trip-access.service';
 
 /**
  * Guide Archive = 한 여행(Trip)에 대해 사용자가 저장한 체크리스트 스냅샷.
@@ -14,7 +15,10 @@ import { PrismaService } from '../../infra/prisma/prisma.service';
 export class GuideArchivesService {
   private readonly logger = new Logger(GuideArchivesService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly tripAccess: TripAccessService,
+  ) {}
 
   async listByTrip(tripId: bigint) {
     const trip = await this.prisma.trip.findFirst({
@@ -38,7 +42,11 @@ export class GuideArchivesService {
     const archives = await this.prisma.guideArchive.findMany({
       where: {
         checklist: {
-          trip: { userId, deletedAt: null },
+          // 내 소유 트립 + 내가 멤버로 합류한 트립 (공동 편집)
+          trip: {
+            deletedAt: null,
+            OR: [{ userId }, { members: { some: { userId } } }],
+          },
         },
       },
       select: {
@@ -83,14 +91,8 @@ export class GuideArchivesService {
   }
 
   async createForTrip(tripId: bigint, userId: bigint, input: { name?: string; snapshot?: unknown; isAiRecommended?: boolean }) {
-    const trip = await this.prisma.trip.findFirst({
-      where: { id: tripId, deletedAt: null },
-      select: { id: true, userId: true },
-    });
-    if (!trip) throw new NotFoundException(`Trip ${tripId} not found`);
-    if (trip.userId !== userId) {
-      throw new ForbiddenException('이 여행에 대한 권한이 없습니다.');
-    }
+    // 멤버도 생성 가능 (공동 편집) — 권한 중앙 검사
+    await this.tripAccess.assertTripAccess(tripId, userId);
 
     const name = (input.name ?? '보관함 항목').toString().slice(0, 120);
     const snapshot = (input.snapshot ?? {}) as Prisma.InputJsonValue;
@@ -126,15 +128,13 @@ export class GuideArchivesService {
       where: { id: archiveId },
       include: {
         checklist: {
-          include: { trip: { select: { userId: true, title: true } } },
+          include: { trip: { select: { id: true, userId: true, title: true } } },
         },
       },
     });
 
     if (!archive) throw new NotFoundException('아카이브를 찾을 수 없습니다.');
-    if (archive.checklist.trip.userId !== userId) {
-      throw new ForbiddenException('접근 권한이 없습니다.');
-    }
+    await this.tripAccess.assertTripAccess(archive.checklist.trip.id, userId, 'view');
 
     return this.serialize(archive);
   }
@@ -144,14 +144,12 @@ export class GuideArchivesService {
       where: { id: archiveId },
       include: {
         checklist: {
-          include: { trip: { select: { userId: true } } },
+          include: { trip: { select: { id: true, userId: true } } },
         },
       },
     });
     if (!existing) throw new NotFoundException('아카이브를 찾을 수 없습니다.');
-    if (existing.checklist.trip.userId !== userId) {
-      throw new ForbiddenException('수정 권한이 없습니다.');
-    }
+    await this.tripAccess.assertTripAccess(existing.checklist.trip.id, userId);
 
     const data: Prisma.GuideArchiveUpdateInput = {};
     if (typeof patch.name === 'string') {
@@ -175,14 +173,13 @@ export class GuideArchivesService {
       where: { id: archiveId },
       include: {
         checklist: {
-          include: { trip: { select: { userId: true } } },
+          include: { trip: { select: { id: true, userId: true } } },
         },
       },
     });
     if (!existing) throw new NotFoundException('아카이브를 찾을 수 없습니다.');
-    if (existing.checklist.trip.userId !== userId) {
-      throw new ForbiddenException('삭제 권한이 없습니다.');
-    }
+    // 보관함 엔트리 삭제는 소유자 전용 (멤버 실수 방지)
+    await this.tripAccess.assertTripAccess(existing.checklist.trip.id, userId, 'owner');
 
     await this.prisma.guideArchive.delete({ where: { id: archiveId } });
     this.logger.log(`archive deleted id=${archiveId}`);

@@ -20,6 +20,7 @@ import {
 import { Public } from '../../common/decorators/public.decorator';
 import { ChecklistsService } from './checklists.service';
 import { ChecklistItemService } from './checklist-item.service';
+import { TripAccessService } from '../trips/trip-access.service';
 import { GenerateFromContextDto } from './dto/generate-from-context.dto';
 import {
   CheckItemDto,
@@ -35,6 +36,7 @@ export class ChecklistsController {
   constructor(
     private readonly checklists: ChecklistsService,
     private readonly checklistItems: ChecklistItemService,
+    private readonly tripAccess: TripAccessService,
   ) {}
 
   /**
@@ -68,7 +70,12 @@ export class ChecklistsController {
    * 먼저 POST /api/checklists/generate/:tripId 를 호출해야 한다.
    */
   @Get('by-trip/:tripId')
-  byTrip(@Param('tripId', ParseIntPipe) tripId: number) {
+  async byTrip(
+    @CurrentUser() user: AuthUser | undefined,
+    @Param('tripId', ParseIntPipe) tripId: number,
+  ) {
+    const userId = this.requireUserId(user);
+    await this.tripAccess.assertTripAccess(BigInt(tripId), userId);
     return this.checklists.getByTrip(BigInt(tripId));
   }
 
@@ -79,7 +86,12 @@ export class ChecklistsController {
    *   GET /api/checklists/by-trip/:tripId/candidates
    */
   @Get('by-trip/:tripId/candidates')
-  listCandidates(@Param('tripId', ParseIntPipe) tripId: number) {
+  async listCandidates(
+    @CurrentUser() user: AuthUser | undefined,
+    @Param('tripId', ParseIntPipe) tripId: number,
+  ) {
+    const userId = this.requireUserId(user);
+    await this.tripAccess.assertTripAccess(BigInt(tripId), userId);
     return this.checklists.listCandidatesForTrip(BigInt(tripId));
   }
 
@@ -180,8 +192,12 @@ export class ChecklistsController {
    */
   @Post('items/:itemId/select')
   @HttpCode(200)
-  async selectItem(@Param('itemId', ParseIntPipe) itemId: number) {
-    const updated = await this.checklistItems.selectItem(BigInt(itemId));
+  async selectItem(
+    @CurrentUser() user: AuthUser | undefined,
+    @Param('itemId', ParseIntPipe) itemId: number,
+  ) {
+    const userId = this.requireUserId(user);
+    const updated = await this.checklistItems.selectItem(BigInt(itemId), userId);
     return {
       id: updated.id.toString(),
       isSelected: updated.isSelected,
@@ -196,8 +212,12 @@ export class ChecklistsController {
    */
   @Post('items/:itemId/deselect')
   @HttpCode(200)
-  async deselectItem(@Param('itemId', ParseIntPipe) itemId: number) {
-    const updated = await this.checklistItems.deselectItem(BigInt(itemId));
+  async deselectItem(
+    @CurrentUser() user: AuthUser | undefined,
+    @Param('itemId', ParseIntPipe) itemId: number,
+  ) {
+    const userId = this.requireUserId(user);
+    const updated = await this.checklistItems.deselectItem(BigInt(itemId), userId);
     return {
       id: updated.id.toString(),
       isSelected: updated.isSelected,
