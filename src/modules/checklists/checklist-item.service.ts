@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   Injectable,
   Logger,
@@ -11,11 +12,14 @@ import {
   ChecklistItemSource,
   ChecklistStatus,
   EditType,
+  ItemScope,
+  NotificationType,
   Prisma,
   PrepType,
 } from '@prisma/client';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { TripAccessService } from '../trips/trip-access.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import {
   OpenaiService,
   ReclassifyInputItem,
@@ -36,6 +40,7 @@ export class ChecklistItemService {
     private readonly prisma: PrismaService,
     private readonly openai: OpenaiService,
     private readonly tripAccess: TripAccessService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // =========================================================
@@ -235,7 +240,8 @@ export class ChecklistItemService {
   }
 
   async editItem(itemId: bigint, userId: bigint, patch: EditItemDto) {
-    await this.tripAccess.assertItemAccess(itemId, userId);
+    const accessItem = await this.tripAccess.assertItemAccess(itemId, userId);
+    const tripId = accessItem.checklist.trip.id;
     const item = await this.prisma.checklistItem.findFirst({
       where: { id: itemId, deletedAt: null },
       include: { category: true },
@@ -246,6 +252,7 @@ export class ChecklistItemService {
     const patchedDesc = patch.description !== undefined ? patch.description : item.description;
     const patchedMemo = patch.memo !== undefined ? patch.memo : item.memo;
     const patchedOrder = patch.orderIndex ?? item.orderIndex;
+    const patchedScope = (patch.scope as ItemScope | undefined) ?? item.scope;
 
     const titleChanged = patch.title !== undefined && patch.title !== item.title;
     const descChanged =
@@ -254,8 +261,41 @@ export class ChecklistItemService {
       patch.memo !== undefined && (patch.memo ?? null) !== (item.memo ?? null);
     const orderChanged =
       patch.orderIndex !== undefined && patch.orderIndex !== item.orderIndex;
+    const scopeChanged = patch.scope !== undefined && patchedScope !== item.scope;
 
-    if (!titleChanged && !descChanged && !memoChanged && !orderChanged) {
+    // 담당자: undefined=변경 없음 / null=해제 / string=지정
+    const patchedAssigneeId =
+      patch.assigneeUserId === undefined
+        ? item.assigneeUserId
+        : patch.assigneeUserId === null
+          ? null
+          : BigInt(patch.assigneeUserId);
+    // 개인 짐으로 전환되면 담당자는 의미가 없으므로 자동 해제
+    const finalAssigneeId = patchedScope === ItemScope.personal ? null : patchedAssigneeId;
+    const assigneeChanged = finalAssigneeId !== item.assigneeUserId;
+
+    if (patch.assigneeUserId != null && patchedScope !== ItemScope.shared) {
+      throw new BadRequestException('담당자는 공동 짐에만 지정할 수 있어요.');
+    }
+    if (assigneeChanged && finalAssigneeId != null) {
+      // 담당자는 트립 오너 또는 수락된 멤버여야 한다
+      const trip = await this.prisma.trip.findFirst({
+        where: { id: tripId },
+        select: {
+          userId: true,
+          members: { where: { status: 'accepted' }, select: { userId: true } },
+        },
+      });
+      const memberIds = new Set<bigint>([
+        ...(trip ? [trip.userId] : []),
+        ...(trip?.members.map((m) => m.userId) ?? []),
+      ]);
+      if (!memberIds.has(finalAssigneeId)) {
+        throw new BadRequestException('이 여행의 멤버만 담당자로 지정할 수 있어요.');
+      }
+    }
+
+    if (!titleChanged && !descChanged && !memoChanged && !orderChanged && !scopeChanged && !assigneeChanged) {
       return {
         ok: true as const,
         itemId: item.id.toString(),
@@ -269,12 +309,16 @@ export class ChecklistItemService {
       description: item.description,
       memo: item.memo,
       orderIndex: item.orderIndex,
+      scope: item.scope,
+      assigneeUserId: item.assigneeUserId?.toString() ?? null,
     };
     const after = {
       title: patchedTitle,
       description: patchedDesc ?? null,
       memo: patchedMemo ?? null,
       orderIndex: patchedOrder,
+      scope: patchedScope,
+      assigneeUserId: finalAssigneeId?.toString() ?? null,
     };
 
     const updated = await this.prisma.$transaction(async (tx) => {
@@ -289,10 +333,19 @@ export class ChecklistItemService {
         description: patchedDesc ?? null,
         memo: patchedMemo ?? null,
         orderIndex: patchedOrder,
+        scope: patchedScope,
+        assigneeUserId: finalAssigneeId,
+        // 개인↔공동 전환 시 체크 상태는 깔끔하게 초기화 (예측 가능성 우선)
+        ...(scopeChanged && { isChecked: false, checkedAt: null }),
       }});
 
       if (result.count === 0) {
         throw new ConflictException('다른 사용자가 이미 수정했습니다. 최신 데이터를 다시 조회하세요.');
+      }
+
+      if (scopeChanged) {
+        await tx.checklistItemPersonalCheck.deleteMany({ where: { itemId } });
+        await this.recalcTeamCompletion(tx, item.checklistId);
       }
 
       await tx.checklistItemEdit.create({
@@ -300,7 +353,7 @@ export class ChecklistItemService {
           itemId,
           userId,
           editType:
-            !titleChanged && !descChanged && !memoChanged && orderChanged
+            !titleChanged && !descChanged && !memoChanged && !scopeChanged && !assigneeChanged && orderChanged
               ? EditType.reorder
               : EditType.text,
           beforeValue: before as Prisma.InputJsonValue,
@@ -314,8 +367,23 @@ export class ChecklistItemService {
       });
     }, { timeout: 30000, maxWait: 10000 });
 
+    // 담당자로 새로 지정됐고 본인 지정이 아니면 알림 (fire-and-forget, notify 내부에서 self 차단)
+    if (assigneeChanged && finalAssigneeId != null) {
+      const trip = await this.prisma.trip.findFirst({
+        where: { id: tripId },
+        select: { title: true },
+      });
+      void this.notifications.notify({
+        userId: finalAssigneeId,
+        type: NotificationType.item_assigned,
+        actorId: userId,
+        tripId,
+        payload: { tripTitle: trip?.title ?? '', itemTitle: patchedTitle },
+      });
+    }
+
     this.logger.log(
-      `[editItem] item=${itemId} user=${userId} titleChanged=${titleChanged} descChanged=${descChanged} memoChanged=${memoChanged} orderChanged=${orderChanged}`,
+      `[editItem] item=${itemId} user=${userId} titleChanged=${titleChanged} descChanged=${descChanged} memoChanged=${memoChanged} orderChanged=${orderChanged} scopeChanged=${scopeChanged} assigneeChanged=${assigneeChanged}`,
     );
 
     return {
@@ -365,10 +433,18 @@ export class ChecklistItemService {
 
     const now = new Date();
     const desired = action === 'checked';
-    const shouldUpdate = item.isChecked !== desired;
+    const checkAction = desired ? CheckAction.checked : CheckAction.unchecked;
 
     const { completionRate, newStatus } = await this.prisma.$transaction(async (tx) => {
-      if (shouldUpdate) {
+      if (item.scope === ItemScope.personal) {
+        // 개인 짐: 멤버별 상태(personalChecks)만 갱신, 공유 isChecked 는 건드리지 않음
+        await tx.checklistItemPersonalCheck.upsert({
+          where: { itemId_userId: { itemId, userId } },
+          create: { itemId, userId, isChecked: desired, checkedAt: desired ? now : null },
+          update: { isChecked: desired, checkedAt: desired ? now : null },
+        });
+      } else if (item.isChecked !== desired) {
+        // 공동 짐: 기존처럼 공유 단일 상태
         await tx.checklistItem.update({
           where: { id: itemId },
           data: { isChecked: desired, checkedAt: desired ? now : null },
@@ -376,55 +452,88 @@ export class ChecklistItemService {
       }
 
       await tx.checklistItemCheck.create({
-        data: {
-          itemId,
-          userId,
-          action: action === 'checked' ? CheckAction.checked : CheckAction.unchecked,
-        },
+        data: { itemId, userId, action: checkAction },
       });
 
-      const checklist = await tx.checklist.findFirst({
-        where: { id: item.checklistId },
-        include: {
-          items: {
-            where: { isSelected: true, deletedAt: null },
-            select: { isChecked: true },
-          },
-        },
-      });
-
-      const total = checklist?.items.length ?? 0;
-      const checked = checklist?.items.filter((i) => i.isChecked).length ?? 0;
-      const completionRate = total === 0 ? 0 : (checked / total) * 100;
-      const newStatus: ChecklistStatus =
-        completionRate === 0
-          ? ChecklistStatus.not_started
-          : completionRate >= 100
-          ? ChecklistStatus.completed
-          : ChecklistStatus.preparing;
-
-      if (shouldUpdate) {
-        await tx.checklist.update({
-          where: { id: item.checklistId },
-          data: { status: newStatus, completionRate },
-        });
-      }
-
-      return { completionRate, newStatus };
+      return this.recalcTeamCompletion(tx, item.checklistId);
     }, { timeout: 30000, maxWait: 10000 });
 
     this.logger.log(
-      `[toggleCheck] item=${itemId} user=${userId} action=${action} updated=${shouldUpdate} rate=${completionRate.toFixed(2)}% status=${newStatus}`,
+      `[toggleCheck] item=${itemId} user=${userId} action=${action} scope=${item.scope} rate=${completionRate.toFixed(2)}% status=${newStatus}`,
     );
 
     return {
       ok: true as const,
       itemId: itemId.toString(),
       action,
+      scope: item.scope,
       isChecked: desired,
       checkedAt: desired ? now.toISOString() : null,
       occurredAt: now.toISOString(),
     };
+  }
+
+  /**
+   * 팀 기준 준비율 재계산 — Checklist.completionRate 영속 필드 (어드민/지표용).
+   * - 공동(shared) 항목: isChecked ? 1 : 0
+   * - 개인(personal) 항목: 체크한 멤버 수 / 전체 멤버 수 (소수 기여)
+   * 요청자 기준 준비율(myCompletionRate)은 getByTrip 응답에서 동적 계산한다.
+   */
+  private async recalcTeamCompletion(
+    tx: Prisma.TransactionClient,
+    checklistId: bigint,
+  ): Promise<{ completionRate: number; newStatus: ChecklistStatus }> {
+    const checklist = await tx.checklist.findFirst({
+      where: { id: checklistId },
+      select: {
+        trip: {
+          select: {
+            userId: true,
+            members: { where: { status: 'accepted' }, select: { userId: true } },
+          },
+        },
+        items: {
+          where: { isSelected: true, deletedAt: null },
+          select: {
+            scope: true,
+            isChecked: true,
+            personalChecks: { where: { isChecked: true }, select: { userId: true } },
+          },
+        },
+      },
+    });
+
+    const memberIds = new Set<bigint>([
+      ...(checklist ? [checklist.trip.userId] : []),
+      ...(checklist?.trip.members.map((m) => m.userId) ?? []),
+    ]);
+    const memberCount = Math.max(memberIds.size, 1);
+
+    const total = checklist?.items.length ?? 0;
+    let progress = 0;
+    for (const it of checklist?.items ?? []) {
+      if (it.scope === ItemScope.shared) {
+        progress += it.isChecked ? 1 : 0;
+      } else {
+        const checked = it.personalChecks.filter((c) => memberIds.has(c.userId)).length;
+        progress += Math.min(checked, memberCount) / memberCount;
+      }
+    }
+
+    const completionRate = total === 0 ? 0 : (progress / total) * 100;
+    const newStatus: ChecklistStatus =
+      completionRate === 0
+        ? ChecklistStatus.not_started
+        : completionRate >= 100
+        ? ChecklistStatus.completed
+        : ChecklistStatus.preparing;
+
+    await tx.checklist.update({
+      where: { id: checklistId },
+      data: { status: newStatus, completionRate },
+    });
+
+    return { completionRate, newStatus };
   }
 
   // =========================================================
@@ -471,6 +580,8 @@ export class ChecklistItemService {
       isSelected: it.isSelected,
       selectedAt: it.selectedAt ? it.selectedAt.toISOString() : null,
       isChecked: it.isChecked,
+      scope: it.scope,
+      assigneeUserId: it.assigneeUserId?.toString() ?? null,
     };
   }
 

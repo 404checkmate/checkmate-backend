@@ -78,6 +78,14 @@ enum ChecklistItemSource {
   user_added
 }
 
+// 개인 짐 / 공동 짐 구분
+//   - personal: 멤버마다 각자 체크 (checklist_item_personal_checks 행 기준)
+//   - shared  : 한 명만 준비하면 되는 공동 품목 — 공유 체크(isChecked) + 담당자(assigneeUserId)
+enum ItemScope {
+  personal
+  shared
+}
+
 enum EditType {
   text
   add
@@ -145,6 +153,8 @@ model User {
   events        UserEvent[]
   itemEdits     ChecklistItemEdit[]
   itemChecks    ChecklistItemCheck[]
+  personalChecks ChecklistItemPersonalCheck[] @relation("PersonalCheckUser")
+  assignedItems  ChecklistItem[]              @relation("ChecklistItemAssignee")
 
   friendshipsRequested Friendship[]   @relation("FriendshipRequester")
   friendshipsReceived  Friendship[]   @relation("FriendshipAddressee")
@@ -373,6 +383,7 @@ enum NotificationType {
   trip_invite_accepted // 내가 보낸 트립 초대가 수락됨 (수신자 = 초대한 사람)
   trip_member_joined   // 초대 링크로 멤버 합류 (수신자 = 트립 소유자)
   friend_accepted      // 내 친구 초대 링크가 수락됨 (수신자 = 링크 생성자)
+  item_assigned        // 공동 짐 담당자로 지정됨 (수신자 = 담당자)
 }
 
 model Notification {
@@ -508,6 +519,10 @@ model ChecklistItem {
   selectedAt DateTime? @map("selected_at")
   isChecked   Boolean             @default(false) @map("is_checked")
   checkedAt   DateTime?           @map("checked_at")
+  // 개인/공동 짐 — personal 은 isChecked 대신 personalChecks 가 멤버별 체크 상태의 진실.
+  // shared 는 기존처럼 isChecked 공유 + assigneeUserId(담당자, 탈퇴 시 null).
+  scope          ItemScope @default(personal)
+  assigneeUserId BigInt?   @map("assignee_user_id")
   createdAt   DateTime            @default(now()) @map("created_at")
   updatedAt   DateTime            @updatedAt @map("updated_at")
   deletedAt   DateTime?           @map("deleted_at")
@@ -515,10 +530,12 @@ model ChecklistItem {
   checklist Checklist              @relation(fields: [checklistId], references: [id], onDelete: Cascade)
   category  ChecklistCategory      @relation(fields: [categoryId], references: [id])
   template  ChecklistItemTemplate? @relation(fields: [templateId], references: [id])
+  assignee  User?                  @relation("ChecklistItemAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
 
-  edits  ChecklistItemEdit[]
-  checks ChecklistItemCheck[]
-  events UserEvent[]
+  edits          ChecklistItemEdit[]
+  checks         ChecklistItemCheck[]
+  personalChecks ChecklistItemPersonalCheck[]
+  events         UserEvent[]
 
   @@index([checklistId, orderIndex])
   @@index([checklistId, isSelected])
@@ -594,6 +611,24 @@ model ChecklistItemCheck {
   @@index([itemId, occurredAt])
   @@index([userId, occurredAt])
   @@map("checklist_item_checks")
+}
+
+// 개인 짐(scope=personal)의 멤버별 체크 상태. (itemId, userId) 당 1행 upsert.
+// ChecklistItemCheck 가 "행동 로그"라면 이 테이블은 "현재 상태"다.
+model ChecklistItemPersonalCheck {
+  id        BigInt    @id @default(autoincrement())
+  itemId    BigInt    @map("item_id")
+  userId    BigInt    @map("user_id")
+  isChecked Boolean   @default(false) @map("is_checked")
+  checkedAt DateTime? @map("checked_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  item ChecklistItem @relation(fields: [itemId], references: [id], onDelete: Cascade)
+  user User          @relation("PersonalCheckUser", fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([itemId, userId])
+  @@index([userId])
+  @@map("checklist_item_personal_checks")
 }
 
 // =========================================================

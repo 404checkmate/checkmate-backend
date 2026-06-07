@@ -59,6 +59,15 @@ export class GuideArchivesService {
           select: {
             status: true,
             completionRate: true,
+            // 요청자 기준 준비율 계산용 — personal 은 내 체크 행, shared 는 공유 isChecked
+            items: {
+              where: { isSelected: true, deletedAt: null },
+              select: {
+                scope: true,
+                isChecked: true,
+                personalChecks: { where: { userId, isChecked: true }, select: { id: true } },
+              },
+            },
             trip: {
               select: {
                 id: true,
@@ -88,6 +97,15 @@ export class GuideArchivesService {
       const members = trip.members.filter((m) => !m.user.deletedAt);
       const isShared = members.length > 0;
       const isOwner = trip.userId === userId;
+      // 내 기준 준비율 — 개인 짐은 내 체크, 공동 짐은 공유 체크. 항목이 없으면 저장된 팀 지표로 폴백.
+      const items = a.checklist.items;
+      const myCheckedCount = items.filter((it) =>
+        it.scope === 'shared' ? it.isChecked : it.personalChecks.length > 0,
+      ).length;
+      const myCompletionRate =
+        items.length === 0
+          ? Number(a.checklist.completionRate)
+          : (myCheckedCount / items.length) * 100;
       // 나를 제외한 참여자(소유자 포함) 미리보기 — 카드 아바타 스택용
       const othersPool = [
         { userId: trip.userId, nickname: trip.user.nickname, profileImageUrl: trip.user.profileImageUrl },
@@ -105,7 +123,8 @@ export class GuideArchivesService {
         isAiRecommended: a.isAiRecommended,
         snapshot: a.snapshot,
         checklistStatus: a.checklist.status,
-        completionRate: Number(a.checklist.completionRate),
+        // 보는 사람 기준 준비율 — 필드명은 기존 프론트 호환을 위해 유지
+        completionRate: myCompletionRate,
         trip: {
           id: trip.id.toString(),
           title: trip.title,
