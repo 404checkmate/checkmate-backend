@@ -66,7 +66,14 @@ export class AdminMetricsService {
             bool_or(event_type = 'detail_check' and metadata->>'_ev' = 'search_item_toggle_select') as selected,
             bool_or(event_type = 'login'        and metadata->>'_ev' = 'login_completed')           as logged_in,
             -- travel_fixed 제외: trip_creation_completed 와 같은 세션에서 중복 발생
-            bool_or(event_type = 'trip_created' and metadata->>'_ev' = 'trip_creation_completed')   as trip_created
+            bool_or(event_type = 'trip_created' and metadata->>'_ev' = 'trip_creation_completed')   as trip_created,
+            -- 저장 시도(이벤트 기반·게스트 포함): 로그인 저장 확정 + 게스트 프리뷰 완료.
+            -- 탐색/항목선택과 동일하게 session_id 기준이라 게스트도 잡혀 분모와 대칭이 됨.
+            bool_or(metadata->>'_ev' in (
+              'save_confirm_navigate_guide_archive',
+              'save_confirm_navigate_guide_archive_merge',
+              'guest_preview_complete_clicked'
+            ))                                                                                       as saved_intent
           from real_events
           group by session_id
         ),
@@ -89,10 +96,15 @@ export class AdminMetricsService {
           (count(*) filter (where explored))::int                                                      as explored,
           (count(*) filter (where selected))::int                                                      as selected,
           (count(*) filter (where saved))::int                                                         as saved,
+          (count(*) filter (where saved_intent))::int                                                  as saved_intent,
           (count(*) filter (where logged_in))::int                                                     as logged_in,
           (count(*) filter (where trip_created))::int                                                  as trip_created,
           round(100.0 * count(*) filter (where explored)     / nullif(count(*) filter (where visited),   0), 1)::float as visit_to_explore_pct,
           round(100.0 * count(*) filter (where saved)        / nullif(count(*) filter (where explored),  0), 1)::float as explore_to_save_pct,
+          -- 탐색→저장시도: 게스트 포함·대칭(이벤트 기준) — 로그인 후순위 효과가 그대로 잡히는 "진짜" 전환율
+          round(100.0 * count(*) filter (where saved_intent) / nullif(count(*) filter (where explored),     0), 1)::float as explore_to_save_intent_pct,
+          -- 저장시도→실제보관: 로그인 관문에서 새는 비율(영속 전환) — 로그인 미루기의 비용
+          round(100.0 * count(*) filter (where saved)        / nullif(count(*) filter (where saved_intent), 0), 1)::float as intent_to_persist_pct,
           round(100.0 * count(*) filter (where trip_created) / nullif(count(*) filter (where logged_in), 0), 1)::float as login_to_trip_pct
         from session_with_save
         group by day
