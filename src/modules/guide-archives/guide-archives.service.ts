@@ -1,5 +1,11 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { ChecklistGeneratedBy, Prisma } from '@prisma/client';
+import {
+  BaggageType,
+  ChecklistGeneratedBy,
+  ChecklistItemSource,
+  PrepType,
+  Prisma,
+} from '@prisma/client';
 import { PrismaService } from '../../infra/prisma/prisma.service';
 import { TripAccessService } from '../trips/trip-access.service';
 
@@ -152,32 +158,118 @@ export class GuideArchivesService {
     await this.tripAccess.assertTripAccess(tripId, userId);
 
     const name = (input.name ?? '보관함 항목').toString().slice(0, 120);
-    const snapshot = (input.snapshot ?? {}) as Prisma.InputJsonValue;
+    const rawSnapshot =
+      input.snapshot &&
+      typeof input.snapshot === 'object' &&
+      !Array.isArray(input.snapshot)
+        ? (input.snapshot as Record<string, unknown>)
+        : {};
 
-    const archive = await this.prisma.$transaction(async (tx) => {
-      const checklist = await tx.checklist.upsert({
-        where: { tripId },
-        create: {
-          tripId,
-          generatedBy: ChecklistGeneratedBy.template,
-          status: 'not_started',
-        },
-        update: {},
-        select: { id: true },
-      });
+    const archive = await this.prisma.$transaction(
+      async (tx) => {
+        const checklist = await tx.checklist.upsert({
+          where: { tripId },
+          create: {
+            tripId,
+            generatedBy: ChecklistGeneratedBy.template,
+            status: 'not_started',
+          },
+          update: {},
+          select: { id: true },
+        });
 
-      return tx.guideArchive.create({
-        data: {
-          checklistId: checklist.id,
-          name,
-          snapshot,
-          isAiRecommended: input.isAiRecommended ?? false,
-        },
-      });
-    });
+        // 큐레이션 등 serverId 없는 snapshot 항목을 실제 ChecklistItem 행으로 만들어
+        // serverId 를 주입한다 — 협업(scope/담당자/멤버별 체크)이 이 행에 붙기 때문.
+        const snapshot = await this.persistSnapshotItems(
+          tx,
+          checklist.id,
+          rawSnapshot,
+        );
+
+        return tx.guideArchive.create({
+          data: {
+            checklistId: checklist.id,
+            name,
+            snapshot: snapshot as Prisma.InputJsonValue,
+            isAiRecommended: input.isAiRecommended ?? false,
+          },
+        });
+      },
+      { timeout: 15000 },
+    );
 
     this.logger.log(`archive created trip=${tripId} id=${archive.id}`);
     return this.serialize(archive);
+  }
+
+  /**
+   * snapshot.items 중 serverId 가 없는 항목(큐레이션 등)을 실제 ChecklistItem 행으로 만들고
+   * 그 id 를 serverId 로 주입해 돌려준다. 이미 serverId 가 있는 항목(AI/검색)은 그대로 둔다.
+   * → 협업 UI(개인/공동·담당자·멤버별 체크)가 붙을 서버 항목이 생긴다.
+   */
+  private async persistSnapshotItems(
+    tx: Prisma.TransactionClient,
+    checklistId: bigint,
+    snapshot: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    const items = Array.isArray(snapshot.items)
+      ? (snapshot.items as Record<string, unknown>[])
+      : null;
+    if (!items || items.length === 0) return snapshot;
+
+    const needsRow = (it: Record<string, unknown>) =>
+      it && (it.serverId == null || String(it.serverId).trim() === '');
+    const targets: Array<{ it: Record<string, unknown>; idx: number }> = [];
+    items.forEach((it, idx) => {
+      if (needsRow(it)) targets.push({ it, idx });
+    });
+    if (targets.length === 0) return snapshot;
+
+    const categories = await tx.checklistCategory.findMany();
+    if (categories.length === 0) return snapshot; // 카테고리 시드 없으면 협업만 생략
+    const categoryIdByCode = new Map(categories.map((c) => [c.code, c.id]));
+    const fallbackCategoryId =
+      categories.find((c) => c.code === 'ai_recommend')?.id ?? categories[0].id;
+
+    const PREP = new Set<string>(Object.values(PrepType));
+    const BAG = new Set<string>(Object.values(BaggageType));
+    const startOrder = await tx.checklistItem.count({ where: { checklistId } });
+
+    const created = await Promise.all(
+      targets.map(({ it }, i) => {
+        const prepType = PREP.has(String(it.prepType))
+          ? (it.prepType as PrepType)
+          : PrepType.item;
+        const baggageType = BAG.has(String(it.baggageType))
+          ? (it.baggageType as BaggageType)
+          : BaggageType.none;
+        const categoryId =
+          (typeof it.categoryCode === 'string'
+            ? categoryIdByCode.get(it.categoryCode)
+            : undefined) ?? fallbackCategoryId;
+        return tx.checklistItem.create({
+          data: {
+            checklistId,
+            categoryId,
+            title: String(it.title ?? '').slice(0, 200) || '항목',
+            description: it.description != null ? String(it.description) : null,
+            prepType,
+            baggageType,
+            source: ChecklistItemSource.user_added,
+            orderIndex: startOrder + i,
+            isSelected: true,
+            selectedAt: new Date(),
+          },
+          select: { id: true },
+        });
+      }),
+    );
+
+    const nextItems = [...items];
+    targets.forEach(({ idx }, i) => {
+      nextItems[idx] = { ...nextItems[idx], serverId: created[i].id.toString() };
+    });
+    return { ...snapshot, items: nextItems };
   }
 
   async findOne(archiveId: bigint, userId: bigint) {
