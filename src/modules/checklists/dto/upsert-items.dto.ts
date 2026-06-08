@@ -5,6 +5,7 @@ import {
   IsIn,
   IsInt,
   IsISO8601,
+  IsNumberString,
   IsOptional,
   IsString,
   Length,
@@ -75,6 +76,20 @@ export class EditItemDto {
   @IsOptional()
   @IsISO8601()
   clientUpdatedAt?: string;
+
+  /** 개인/공동 짐 전환. 전환 시 체크 상태는 초기화된다. */
+  @IsOptional()
+  @IsIn(['personal', 'shared'])
+  scope?: 'personal' | 'shared';
+
+  /**
+   * 공동 짐 담당자 (stringified userId). null 이면 담당자 해제.
+   * scope=shared 인 항목(또는 이번 patch 로 shared 가 되는 항목)에만 허용.
+   * IsOptional 은 null 도 통과시키므로 해제(null) 표현이 가능하다.
+   */
+  @IsOptional()
+  @IsNumberString()
+  assigneeUserId?: string | null;
 }
 
 export class CheckItemDto {

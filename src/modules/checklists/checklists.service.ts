@@ -30,10 +30,20 @@ export interface GeneratedChecklistItem {
   /** 사용자가 "내 체크리스트"에 담았는지. 후보 풀에서만 false 인 항목이 섞여있다. */
   isSelected: boolean;
   selectedAt: string | null;
-  /** 사용자가 체크(완료)했는지. 후보 풀에서는 의미 없음. */
+  /** 사용자가 체크(완료)했는지. 후보 풀에서는 의미 없음. shared 항목의 공유 상태. */
   isChecked: boolean;
+  /** 개인/공동 짐 구분 — personal 은 멤버별 체크, shared 는 공유 체크 + 담당자 */
+  scope: 'personal' | 'shared';
+  /** 공동 짐 담당자 userId (stringified) — serializeItem 경로용. getByTrip 은 assignee 로 풍부화 */
+  assigneeUserId?: string | null;
   /** 마지막으로 편집/체크한 사용자 — 공동 편집 표시용 (getByTrip 에서만 채워짐) */
   lastActor?: { nickname: string; profileImageUrl: string | null; at: string } | null;
+  /** 요청자 기준 체크 상태 — personal 은 내 행, shared 는 isChecked (getByTrip 에서만 채워짐) */
+  myChecked?: boolean;
+  /** personal 항목의 멤버 진척 집계 (getByTrip 에서만 채워짐) */
+  personalSummary?: { checkedCount: number; memberCount: number } | null;
+  /** shared 항목의 담당자 (getByTrip 에서만 채워짐) */
+  assignee?: { userId: string; nickname: string; profileImageUrl: string | null } | null;
 }
 
 export interface GeneratedChecklist {
@@ -48,6 +58,8 @@ export interface GeneratedChecklist {
     model: string | null;
     /** 'db-cached' 이면 기존 ChecklistItem 을 그대로 돌려준 것(OpenAI 미호출). */
     cacheStatus: 'fresh' | 'db-cached';
+    /** 요청자 기준 준비율(%) — 내 개인 짐 체크 + 공동 짐 체크 기준 (getByTrip 에서만 채워짐) */
+    myCompletionRate?: number;
   };
   sections: Array<{
     categoryCode: string;
@@ -141,7 +153,7 @@ export class ChecklistsService {
    * "내 체크리스트" 조회 — isSelected=true 인 아이템만 GeneratedChecklist 형태로 반환.
    * 후보 풀 전체(미선택 포함)가 필요하면 listCandidatesForTrip 를 사용.
    */
-  async getByTrip(tripId: bigint): Promise<GeneratedChecklist> {
+  async getByTrip(tripId: bigint, userId?: bigint): Promise<GeneratedChecklist> {
     const trip = await this.loadTripForContext(tripId);
     const checklist = await this.prisma.checklist.findUnique({
       where: { tripId },
@@ -161,7 +173,85 @@ export class ChecklistsService {
       checklist.generatedBy,
     );
     await this.attachLastActors(response);
+    if (userId != null) await this.attachPersonalState(response, tripId, userId);
     return response;
+  }
+
+  /**
+   * 요청자 관점의 체크 상태를 부착 (개인/공동 짐 기능).
+   * - myChecked: personal 은 내 personalChecks 행, shared 는 공유 isChecked
+   * - personalSummary: personal 항목의 "n/m명 준비 완료" 집계 (현재 멤버 기준)
+   * - assignee: shared 항목의 담당자 프로필
+   * - summary.myCompletionRate: 내 기준 준비율(%)
+   */
+  private async attachPersonalState(
+    checklist: GeneratedChecklist,
+    tripId: bigint,
+    userId: bigint,
+  ): Promise<void> {
+    const ids = checklist.items
+      .map((i) => i.id)
+      .filter((v): v is string => v != null)
+      .map((v) => BigInt(v));
+
+    const [trip, rows] = await Promise.all([
+      this.prisma.trip.findFirst({
+        where: { id: tripId },
+        select: {
+          userId: true,
+          members: { where: { status: 'accepted' }, select: { userId: true } },
+        },
+      }),
+      ids.length === 0
+        ? Promise.resolve([])
+        : this.prisma.checklistItem.findMany({
+            where: { id: { in: ids } },
+            select: {
+              id: true,
+              scope: true,
+              isChecked: true,
+              assignee: { select: { id: true, nickname: true, profileImageUrl: true } },
+              personalChecks: { where: { isChecked: true }, select: { userId: true } },
+            },
+          }),
+    ]);
+
+    const memberIds = new Set<bigint>([
+      ...(trip ? [trip.userId] : []),
+      ...(trip?.members.map((m) => m.userId) ?? []),
+    ]);
+    const memberCount = Math.max(memberIds.size, 1);
+    const byId = new Map(rows.map((r) => [r.id.toString(), r]));
+
+    // items 와 sections 는 같은 객체를 참조하지만, 복사본일 가능성까지 대비해 양쪽 순회
+    const allItems = [...checklist.items, ...checklist.sections.flatMap((s) => s.items)];
+    for (const item of allItems) {
+      const row = item.id ? byId.get(item.id) : undefined;
+      if (!row) continue;
+      if (row.scope === 'shared') {
+        item.myChecked = row.isChecked;
+        item.personalSummary = null;
+        item.assignee = row.assignee
+          ? {
+              userId: row.assignee.id.toString(),
+              nickname: row.assignee.nickname,
+              profileImageUrl: row.assignee.profileImageUrl,
+            }
+          : null;
+      } else {
+        const checkedMembers = row.personalChecks.filter((c) => memberIds.has(c.userId));
+        item.myChecked = row.personalChecks.some((c) => c.userId === userId);
+        item.personalSummary = {
+          checkedCount: Math.min(checkedMembers.length, memberCount),
+          memberCount,
+        };
+        item.assignee = null;
+      }
+    }
+
+    const total = checklist.items.length;
+    const myChecked = checklist.items.filter((i) => i.myChecked).length;
+    checklist.summary.myCompletionRate = total === 0 ? 0 : (myChecked / total) * 100;
   }
 
   /**
@@ -467,6 +557,7 @@ export class ChecklistsService {
           isSelected: false,
           selectedAt: null,
           isChecked: false,
+          scope: 'personal' as const,
         } satisfies GeneratedChecklistItem;
       });
     } catch (e) {
@@ -647,6 +738,8 @@ export class ChecklistsService {
       isSelected: it.isSelected,
       selectedAt: it.selectedAt ? it.selectedAt.toISOString() : null,
       isChecked: it.isChecked,
+      scope: it.scope,
+      assigneeUserId: it.assigneeUserId?.toString() ?? null,
     }));
 
     const fromTemplate = normalized.filter((i) => i.source === 'template').length;
@@ -835,6 +928,7 @@ export class ChecklistsService {
       isSelected: false,
       selectedAt: null,
       isChecked: false,
+      scope: 'personal' as const,
     }));
   }
 

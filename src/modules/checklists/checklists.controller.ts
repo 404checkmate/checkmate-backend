@@ -76,7 +76,7 @@ export class ChecklistsController {
   ) {
     const userId = this.requireUserId(user);
     await this.tripAccess.assertTripAccess(BigInt(tripId), userId);
-    return this.checklists.getByTrip(BigInt(tripId));
+    return this.checklists.getByTrip(BigInt(tripId), userId);
   }
 
   /**
