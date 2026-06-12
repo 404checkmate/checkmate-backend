@@ -1,3 +1,19 @@
+<div align="center">
+
+<img src="https://avatars.githubusercontent.com/u/275568950?s=400&u=fb26e17e18bb6c9aaa44277cbe910638e3922cf9&v=4" width="120" alt="CHECKMATE logo" />
+
+# ♟️ CHECKMATE — Backend
+
+### 준비는 쉽게, 여행은 완벽하게
+AI 맞춤 여행 체크리스트 서비스의 백엔드 API 서버 (NestJS 11)
+
+[![Live Demo](https://img.shields.io/badge/🌐_Live_Demo-checkmate--v.com-3DB4DD?style=for-the-badge)](https://checkmate-v.com)
+[![Frontend](https://img.shields.io/badge/Frontend-Repo-FBBF24?style=for-the-badge&logo=github&logoColor=white)](https://github.com/404checkmate/Checkmate-Frontend)
+
+</div>
+
+---
+
 # Checkmate Backend
 
 Checkmate(AI 여행 체크리스트) 서비스의 백엔드.
@@ -96,3 +112,16 @@ curl http://localhost:8080/api/master/countries
 
 JWT 는 Supabase Auth 세션에서 `access_token` 을 꺼내
 `Authorization: Bearer <token>` 헤더로 전송한다.
+
+---
+
+## 🔗 관련 링크 · Links
+
+- 🌐 **Live**: [checkmate-v.com](https://checkmate-v.com)
+- 🎨 **Frontend**: [404checkmate/Checkmate-Frontend](https://github.com/404checkmate/Checkmate-Frontend)
+
+<div align="center">
+
+**Team 404 · CHECKMATE · 2026**
+
+</div>
