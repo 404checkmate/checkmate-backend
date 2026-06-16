@@ -366,6 +366,73 @@ export class AdminMetricsService {
     );
   }
 
+  /**
+   * 쿼리 14. 광고 타겟 항목 분석.
+   * 탐색 단계 "선택 클릭"(능동적 담기 = 구매의도 신호)을 1차 기준으로,
+   * 보관함 "저장 유저수"(의도 지속)를 보조 지표로 함께 노출한다.
+   * 저장 빈도는 AI 기본 세트를 통째로 저장하는 특성상 변별력이 낮아 선택 클릭을 주 정렬로 둔다.
+   * ad_category: 제휴/광고가 실제로 붙는 항목만 분류(eSIM·환전·항공·숙소·보험 등) — null이면 광고가치 낮음.
+   */
+  adTargeting(from: string, to: string) {
+    return this.cached(`adTargeting:${from}:${to}`, () =>
+      this.prisma.$queryRaw`
+        with real_events as (${this.realEventsSql(from, to)}),
+        clk as (
+          -- 탐색에서 담기 토글 ON → item_id로 항목명(title) 복원
+          select re.session_id, ci.title
+          from real_events re
+          join checklist_items ci on ci.id = re.item_id
+          where re.event_type = 'detail_check'
+            and re.metadata->>'_ev' = 'search_item_toggle_select'
+            and re.metadata->>'selected_after' = 'true'
+        ),
+        clk_tot as (select count(*) as n from clk),
+        sel as (
+          select title,
+            count(*)::int                  as select_clicks,
+            count(distinct session_id)::int as select_sessions
+          from clk
+          group by title
+        ),
+        sav as (
+          -- 보관함 저장(영속): is_selected=true 행, 기간은 selected_at 기준
+          select ci.title, count(distinct t.user_id)::int as save_users
+          from checklist_items ci
+          join checklists cl on cl.id = ci.checklist_id
+          join trips t       on t.id  = cl.trip_id
+          join users u       on u.id  = t.user_id
+          where ci.is_selected = true
+            and ci.deleted_at is null
+            and t.deleted_at is null
+            and u.deleted_at is null
+            and lower(u.email) not in (${this.teamEmails()})
+            and ci.selected_at >= ${from}::date
+            and ci.selected_at < ${to}::date + 1
+          group by ci.title
+        )
+        select
+          sel.title,
+          sel.select_clicks,
+          sel.select_sessions,
+          round(100.0 * sel.select_clicks / nullif((select n from clk_tot), 0), 1)::float as select_share_pct,
+          coalesce(sav.save_users, 0)::int as save_users,
+          case
+            when sel.title ilike any (array['%이심%', '%유심%', '%로밍%', '%와이파이%']) then 'eSIM/로밍'
+            when sel.title ilike any (array['%환전%', '%현금%', '%카드%'])                then '환전/트래블카드'
+            when sel.title ilike '%항공권%'                                              then '항공권 OTA'
+            when sel.title ilike '%숙소%'                                                then '숙소 예약'
+            when sel.title ilike '%보험%'                                                then '여행자보험'
+            when sel.title ilike '%여권%'                                                then '여권/비자 서비스'
+            else null
+          end as ad_category
+        from sel
+        left join sav on sav.title = sel.title
+        order by sel.select_clicks desc, sel.select_sessions desc
+        limit 15
+      `,
+    );
+  }
+
   /** 쿼리 12. 여행 스타일 테스트 결과 유형 분포 (travel_test_completed의 result 메타 기준) */
   travelTestTypes(from: string, to: string) {
     return this.cached(`travelTestTypes:${from}:${to}`, () =>
