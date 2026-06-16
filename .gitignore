@@ -43,3 +43,10 @@ prisma/.env
 
 # temp
 .tsbuildinfo
+
+# 내부 분석/운영 스크립트 — 팀원 이메일 하드코딩(개인정보) → 공개 레포 커밋 금지
+scripts/pm2.cjs
+scripts/pm3.cjs
+scripts/presentation-metrics.cjs
+scripts/ad-targeting.cjs
+scripts/enable-rls.sql

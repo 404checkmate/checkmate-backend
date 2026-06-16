@@ -82,4 +82,10 @@ export class AdminMetricsController {
     const r = resolveRange(from, to);
     return this.metrics.collab(r.from, r.to);
   }
+
+  @Get('ad-targeting')
+  adTargeting(@Query('from') from?: string, @Query('to') to?: string) {
+    const r = resolveRange(from, to);
+    return this.metrics.adTargeting(r.from, r.to);
+  }
 }
