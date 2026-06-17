@@ -558,10 +558,27 @@ model ChecklistItemTemplate {
   category ChecklistCategory @relation(fields: [categoryId], references: [id])
   country  Country?          @relation(fields: [countryId], references: [id])
   items    ChecklistItem[]
+  affiliateLink AffiliateLink?
 
   @@index([categoryId])
   @@index([countryId])
   @@map("checklist_item_templates")
+}
+
+/// 제휴(쿠팡 파트너스 / 마이리얼트립) 링크 — 템플릿 항목 1개당 1개. 관리자 페이지에서 관리.
+model AffiliateLink {
+  id         BigInt   @id @default(autoincrement())
+  templateId BigInt   @unique @map("template_id")
+  provider   String // 'coupang' | 'mrt'
+  url        String
+  label      String?
+  isActive   Boolean  @default(true) @map("is_active")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  template ChecklistItemTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@map("affiliate_links")
 }
 
 model GuideArchive {
