@@ -58,6 +58,14 @@ if [[ "${DEPLOY_BACKEND}" == "true" ]]; then
     mv "${BACKEND_DST}/dist" "${BACKEND_DST}/dist.prev"
   fi
   cp -r "${BACKEND_SRC}/dist"         "${BACKEND_DST}/dist"
+
+  # node_modules 도 원자적 교체 — 기존 디렉터리가 있으면 `cp -r` 가 그 안에
+  # 중첩(node_modules/node_modules)되어 구 @prisma/client 가 남는 버그 방지.
+  # (dist 만 갱신되고 Prisma Client 가 옛 스키마로 고착되는 원인)
+  if [[ -d "${BACKEND_DST}/node_modules" ]]; then
+    rm -rf "${BACKEND_DST}/node_modules.prev"
+    mv "${BACKEND_DST}/node_modules" "${BACKEND_DST}/node_modules.prev"
+  fi
   cp -r "${BACKEND_SRC}/node_modules" "${BACKEND_DST}/node_modules"
   cp    "${BACKEND_SRC}/package.json" "${BACKEND_DST}/package.json"
 
