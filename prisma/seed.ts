@@ -226,6 +226,8 @@ type TemplateSeed = {
   prepType: PrepType;
   baggageType: BaggageType;
   isEssential?: boolean;
+  /** 조건부 노출 — { countries: string[] }: destination에 해당 국가명 포함 시에만 추천 */
+  conditions?: Prisma.InputJsonValue;
 };
 
 const DEFAULT_TEMPLATES: TemplateSeed[] = [
@@ -280,6 +282,8 @@ const DEFAULT_TEMPLATES: TemplateSeed[] = [
   { categoryCode: 'travel_goods', title: '양우산', description: '비도 막고 햇빛도 막고 활용도 높아요', prepType: 'item', baggageType: 'carry_on' },
   { categoryCode: 'travel_goods', title: '보조 가방', description: '짐 늘어나는 순간 바로 필요해요', prepType: 'item', baggageType: 'checked' },
   { categoryCode: 'travel_goods', title: '여행용 압축 파우치', description: '옷 부피를 줄여 캐리어 공간을 확보해줘요', prepType: 'item', baggageType: 'checked' },
+  // 조건부: 열대 바다 국가에서만 추천 (destination 국가명 매칭)
+  { categoryCode: 'travel_goods', title: '수영용품 (스노클, 수경, 비치타올, 아쿠아삭스, 아쿠아슈즈, 방수팩)', description: '해변·물놀이 즐기려면 챙기면 좋아요', prepType: 'item', baggageType: 'checked', conditions: { countries: ['괌', '사이판', '태국', '베트남', '필리핀', '인도네시아', '말레이시아', '캄보디아', '싱가포르'] } },
   { categoryCode: 'travel_goods', title: '일회용 베개커버', description: '피부 또는 위생에 민감하면 챙기는 게 좋아요', prepType: 'item', baggageType: 'checked' },
   { categoryCode: 'travel_goods', title: '비닐봉투/지퍼백', description: '젖은 옷이나 쓰레기 등 따로 담을 때 필요해요', prepType: 'item', baggageType: 'checked' },
   { categoryCode: 'travel_goods', title: '샤워기헤드/샤워기필터', description: '수질 안 좋은 나라에서는 필수템이에요', prepType: 'item', baggageType: 'checked' },
@@ -327,7 +331,7 @@ async function seedChecklistItemTemplates() {
       description: t.description ?? null,
       prepType: t.prepType,
       baggageType: t.baggageType,
-      conditions: {} as Prisma.InputJsonValue,
+      conditions: (t.conditions ?? {}) as Prisma.InputJsonValue,
       isEssential: t.isEssential ?? false,
     };
 
