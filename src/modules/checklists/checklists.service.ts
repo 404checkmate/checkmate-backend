@@ -527,7 +527,7 @@ export class ChecklistsService {
     tripIdLabel: string,
   ): Promise<GeneratedChecklist> {
     // --- 1) DB 기본 템플릿 ---
-    const templateItems = await this.loadTemplateItems();
+    const templateItems = await this.loadTemplateItems(context.destination);
 
     // --- 2) OpenAI 추가 추천 ---
     let llmItems: GeneratedChecklistItem[] = [];
@@ -907,14 +907,31 @@ export class ChecklistsService {
     return false;
   }
 
+  /**
+   * 템플릿 conditions(JSON) 평가 — 비어있으면 항상 포함(하위호환).
+   * 현재 지원: { countries: string[] } — destination(국가명 포함 문자열)에
+   * 목록 중 하나가 포함될 때만 노출. (예: 수영용품 → 열대 바다 국가에서만)
+   */
+  private matchesConditions(conditions: unknown, destination?: string): boolean {
+    if (!conditions || typeof conditions !== 'object') return true;
+    const c = conditions as { countries?: string[] };
+    if (Array.isArray(c.countries) && c.countries.length > 0) {
+      const dest = destination ?? '';
+      if (!c.countries.some((name) => dest.includes(name))) return false;
+    }
+    return true;
+  }
+
   /** DB 의 ChecklistItemTemplate(countryId=null 공통분) 을 GeneratedChecklistItem 형태로 로드. */
-  private async loadTemplateItems(): Promise<GeneratedChecklistItem[]> {
+  private async loadTemplateItems(destination?: string): Promise<GeneratedChecklistItem[]> {
     const templates = await this.prisma.checklistItemTemplate.findMany({
       where: { countryId: null },
       include: { category: true },
       orderBy: [{ category: { sortOrder: 'asc' } }, { id: 'asc' }],
     });
-    return templates.map((t, idx) => ({
+    return templates
+      .filter((t) => this.matchesConditions(t.conditions, destination))
+      .map((t, idx) => ({
       id: null,
       title: t.title,
       description: t.description ?? undefined,
