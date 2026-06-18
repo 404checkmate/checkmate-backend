@@ -230,6 +230,9 @@ type TemplateSeed = {
   conditions?: Prisma.InputJsonValue;
 };
 
+/** 열대 바다 국가 — 수영용품 등 해변 한정 항목의 노출 조건 */
+const BEACH_COUNTRIES = ['괌', '사이판', '태국', '베트남', '필리핀', '인도네시아', '말레이시아', '캄보디아', '싱가포르'];
+
 const DEFAULT_TEMPLATES: TemplateSeed[] = [
   // 필수 준비물
   { categoryCode: 'essentials', title: '항공권(e티켓 캡처, 출력본)', description: '탑승할 때 보여줘야 해서 미리 준비해두면 편해요', prepType: 'item', baggageType: 'none', isEssential: true },
@@ -282,8 +285,13 @@ const DEFAULT_TEMPLATES: TemplateSeed[] = [
   { categoryCode: 'travel_goods', title: '양우산', description: '비도 막고 햇빛도 막고 활용도 높아요', prepType: 'item', baggageType: 'carry_on' },
   { categoryCode: 'travel_goods', title: '보조 가방', description: '짐 늘어나는 순간 바로 필요해요', prepType: 'item', baggageType: 'checked' },
   { categoryCode: 'travel_goods', title: '여행용 압축 파우치', description: '옷 부피를 줄여 캐리어 공간을 확보해줘요', prepType: 'item', baggageType: 'checked' },
-  // 조건부: 열대 바다 국가에서만 추천 (destination 국가명 매칭)
-  { categoryCode: 'travel_goods', title: '수영용품 (스노클, 수경, 비치타올, 아쿠아삭스, 아쿠아슈즈, 방수팩)', description: '해변·물놀이 즐기려면 챙기면 좋아요', prepType: 'item', baggageType: 'checked', conditions: { countries: ['괌', '사이판', '태국', '베트남', '필리핀', '인도네시아', '말레이시아', '캄보디아', '싱가포르'] } },
+  // 조건부: 열대 바다 국가에서만 추천 (destination 국가명 매칭). 수영용품 6종 분리.
+  { categoryCode: 'travel_goods', title: '스노클', description: '물속 구경할 때 있으면 좋아요', prepType: 'item', baggageType: 'checked', conditions: { countries: BEACH_COUNTRIES } },
+  { categoryCode: 'travel_goods', title: '수경', description: '수영장·바다에서 눈을 보호해줘요', prepType: 'item', baggageType: 'carry_on', conditions: { countries: BEACH_COUNTRIES } },
+  { categoryCode: 'travel_goods', title: '비치타올', description: '해변에서 깔고 닦고 두루 써요', prepType: 'item', baggageType: 'checked', conditions: { countries: BEACH_COUNTRIES } },
+  { categoryCode: 'travel_goods', title: '아쿠아삭스', description: '맨발 자극 줄이고 미끄럼을 막아줘요', prepType: 'item', baggageType: 'checked', conditions: { countries: BEACH_COUNTRIES } },
+  { categoryCode: 'travel_goods', title: '아쿠아슈즈', description: '바위·산호 바닥에서 발을 보호해요', prepType: 'item', baggageType: 'checked', conditions: { countries: BEACH_COUNTRIES } },
+  { categoryCode: 'travel_goods', title: '방수팩', description: '휴대폰·귀중품을 물에서 지켜줘요', prepType: 'item', baggageType: 'carry_on', conditions: { countries: BEACH_COUNTRIES } },
   { categoryCode: 'travel_goods', title: '일회용 베개커버', description: '피부 또는 위생에 민감하면 챙기는 게 좋아요', prepType: 'item', baggageType: 'checked' },
   { categoryCode: 'travel_goods', title: '비닐봉투/지퍼백', description: '젖은 옷이나 쓰레기 등 따로 담을 때 필요해요', prepType: 'item', baggageType: 'checked' },
   { categoryCode: 'travel_goods', title: '샤워기헤드/샤워기필터', description: '수질 안 좋은 나라에서는 필수템이에요', prepType: 'item', baggageType: 'checked' },
