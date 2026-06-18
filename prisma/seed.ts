@@ -279,6 +279,7 @@ const DEFAULT_TEMPLATES: TemplateSeed[] = [
   { categoryCode: 'travel_goods', title: '휴대용 휴지, 물티슈', description: '없는 곳도 꽤 있어서 챙기는 게 편해요', prepType: 'item', baggageType: 'carry_on' },
   { categoryCode: 'travel_goods', title: '양우산', description: '비도 막고 햇빛도 막고 활용도 높아요', prepType: 'item', baggageType: 'carry_on' },
   { categoryCode: 'travel_goods', title: '보조 가방', description: '짐 늘어나는 순간 바로 필요해요', prepType: 'item', baggageType: 'checked' },
+  { categoryCode: 'travel_goods', title: '여행용 압축 파우치', description: '옷 부피를 줄여 캐리어 공간을 확보해줘요', prepType: 'item', baggageType: 'checked' },
   { categoryCode: 'travel_goods', title: '일회용 베개커버', description: '피부 또는 위생에 민감하면 챙기는 게 좋아요', prepType: 'item', baggageType: 'checked' },
   { categoryCode: 'travel_goods', title: '비닐봉투/지퍼백', description: '젖은 옷이나 쓰레기 등 따로 담을 때 필요해요', prepType: 'item', baggageType: 'checked' },
   { categoryCode: 'travel_goods', title: '샤워기헤드/샤워기필터', description: '수질 안 좋은 나라에서는 필수템이에요', prepType: 'item', baggageType: 'checked' },

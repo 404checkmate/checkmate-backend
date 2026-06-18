@@ -88,4 +88,10 @@ export class AdminMetricsController {
     const r = resolveRange(from, to);
     return this.metrics.adTargeting(r.from, r.to);
   }
+
+  @Get('affiliate-clicks')
+  affiliateClicks(@Query('from') from?: string, @Query('to') to?: string) {
+    const r = resolveRange(from, to);
+    return this.metrics.affiliateClicks(r.from, r.to);
+  }
 }

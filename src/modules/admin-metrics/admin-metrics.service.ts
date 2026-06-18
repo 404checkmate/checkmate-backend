@@ -450,4 +450,97 @@ export class AdminMetricsService {
       `,
     );
   }
+
+  /**
+   * 쿼리 15. 제휴 클릭 지표 (affiliate_click 이벤트).
+   * 일별 추이 / provider별 / 항목별 TOP / 퍼널 교차(탐색·저장 세션 중 클릭 비율).
+   * 구매 전환·수익은 우리 DB 밖(제휴사 리포트)이라 클릭까지만.
+   */
+  affiliateClicks(from: string, to: string) {
+    return this.cached(`affiliateClicks:${from}:${to}`, async () => {
+      const daily = (await this.prisma.$queryRaw`
+        with real_events as (${this.realEventsSql(from, to)})
+        select
+          occurred_at::date::text as day,
+          (count(*) filter (where metadata->>'provider' = 'coupang'))::int as coupang,
+          (count(*) filter (where metadata->>'provider' = 'mrt'))::int     as mrt,
+          count(*)::int as total
+        from real_events
+        where metadata->>'_ev' = 'affiliate_click'
+        group by day
+        order by day
+      `) as unknown[];
+
+      const byProvider = (await this.prisma.$queryRaw`
+        with real_events as (${this.realEventsSql(from, to)})
+        select
+          coalesce(metadata->>'provider', '(unknown)') as provider,
+          count(*)::int                                as clicks,
+          count(distinct session_id)::int             as sessions
+        from real_events
+        where metadata->>'_ev' = 'affiliate_click'
+        group by 1
+        order by clicks desc
+      `) as unknown[];
+
+      const topItems = (await this.prisma.$queryRaw`
+        with real_events as (${this.realEventsSql(from, to)})
+        select
+          metadata->>'item'                     as item,
+          coalesce(metadata->>'provider', '')   as provider,
+          count(*)::int                         as clicks,
+          count(distinct session_id)::int       as sessions
+        from real_events
+        where metadata->>'_ev' = 'affiliate_click' and metadata->>'item' is not null
+        group by 1, 2
+        order by clicks desc
+        limit 15
+      `) as unknown[];
+
+      const summaryRows = (await this.prisma.$queryRaw`
+        with real_events as (${this.realEventsSql(from, to)}),
+        session_stages as (
+          select
+            session_id,
+            max(user_id)           as user_id,
+            min(occurred_at)::date as day,
+            bool_or(event_type = 'search' and metadata->>'_ev' = 'search_items_loaded') as explored,
+            bool_or(metadata->>'_ev' = 'affiliate_click')                                as clicked
+          from real_events
+          group by session_id
+        ),
+        sws as (
+          select ss.*, exists (
+            select 1
+            from trips t
+            join checklists     cl on cl.trip_id      = t.id
+            join guide_archives ga on ga.checklist_id = cl.id
+            where t.user_id = ss.user_id and ga.archived_at::date = ss.day
+          ) as saved
+          from session_stages ss
+        )
+        select
+          (count(*) filter (where clicked))::int   as click_sessions,
+          (count(*) filter (where explored))::int  as explore_sessions,
+          (count(*) filter (where saved))::int     as saved_sessions,
+          round(100.0 * count(*) filter (where explored and clicked) / nullif(count(*) filter (where explored), 0), 1)::float as explore_to_click_pct,
+          round(100.0 * count(*) filter (where saved and clicked)    / nullif(count(*) filter (where saved), 0), 1)::float    as save_to_click_pct
+        from sws
+      `) as Array<Record<string, unknown>>;
+
+      const totalRows = (await this.prisma.$queryRaw`
+        with real_events as (${this.realEventsSql(from, to)})
+        select count(*)::int as total_clicks
+        from real_events
+        where metadata->>'_ev' = 'affiliate_click'
+      `) as Array<Record<string, unknown>>;
+
+      return {
+        daily,
+        byProvider,
+        topItems,
+        summary: { ...(totalRows[0] ?? {}), ...(summaryRows[0] ?? {}) },
+      };
+    });
+  }
 }
