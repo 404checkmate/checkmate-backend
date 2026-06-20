@@ -35,7 +35,7 @@ npm run prisma:seed       # Seed database
 npm run llm:test          # scripts/test-llm.ts smoke test
 ```
 
-Local infrastructure (Postgres + Redis) via Docker:
+Local infrastructure (Postgres) via Docker:
 ```bash
 docker-compose up -d
 ```
@@ -73,7 +73,7 @@ modules/
   master/       # Read-only reference data (countries, cities, categories, styles)
   trips/        # Trip CRUD + companions, flights, travel styles
   checklists/   # Checklist + item management; split into ChecklistService and ChecklistItemService
-  llm/          # OpenAI wrapper (openai.service.ts); BullMQ queue for async LLM jobs
+  llm/          # OpenAI wrapper (openai.service.ts) — synchronous LLM calls
   guide-archives/ # Archived guide management (uses $transaction for create)
   analytics/    # UserEvent tracking
 ```
@@ -91,7 +91,9 @@ Core domain models: `User` → `Trip` → `Checklist` → `ChecklistItem`. Maste
 
 ### LLM Integration
 
-`LlmModule` wraps OpenAI via `openai.service.ts`. Checklist generation is enqueued as BullMQ jobs (Redis-backed) and processed asynchronously. The `LlmStatus` enum (`pending | success | failed`) tracks job state on the `Checklist` model. Default model: `gpt-4o-mini` (overridable via `LLM_MODEL` env var).
+`LlmModule` wraps OpenAI via `openai.service.ts`. Checklist generation runs **synchronously** during the request that triggers it — `LlmService.requestChecklist` records an `llm_generations` row and `ChecklistsService` calls OpenAI inline. The `LlmStatus` enum (`pending | success | failed`) tracks generation state. Default model: `gpt-4o-mini` (overridable via `LLM_MODEL` env var).
+
+> Async processing via BullMQ + Redis is **planned, not implemented** — see the `TODO(next PR)` in `llm.service.ts`. `@nestjs/bullmq`/`bullmq` are installed as dependencies but no queue, worker, or `BullModule` is wired up yet.
 
 ### Environment Variables
 
@@ -102,7 +104,7 @@ Key vars (see `.env.example` for full list):
 | `DATABASE_URL` | Prisma connection (pooler-safe) |
 | `DIRECT_URL` | Direct Postgres URL for migrations |
 | `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_JWT_SECRET` / `SUPABASE_SERVICE_ROLE_KEY` | Auth verification & admin API |
-| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | BullMQ backing store |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_PASSWORD` | Reserved for planned BullMQ queue (currently unused) |
 | `LLM_PROVIDER` / `LLM_API_KEY` / `LLM_MODEL` | OpenAI config |
 | `CORS_ORIGIN` | Comma-separated allowed origins |
 | `AUTH_DEV_BYPASS` | Skip JWT in development (forbidden in prod) |

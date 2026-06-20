@@ -27,7 +27,7 @@ Checkmate(AI 여행 체크리스트) 서비스의 백엔드.
 | Database | PostgreSQL 16 (Supabase 호스팅 가능) |
 | ORM | Prisma 6 |
 | Auth | Supabase Auth (JWT 검증은 Nest `SupabaseJwtGuard`) |
-| Queue | BullMQ + Redis (LLM 비동기 처리) |
+| LLM | OpenAI (`openai.service.ts`) — 요청 처리 중 동기 호출 |
 | Validation | class-validator + zod (env) |
 
 ## Directory Structure
@@ -42,7 +42,7 @@ checkmate-backend/
 │   ├── app.module.ts
 │   ├── common/              # Guard, Interceptor, Filter, Decorator
 │   ├── config/              # typed config + zod env 검증
-│   ├── infra/               # Prisma, Supabase, Redis
+│   ├── infra/               # Prisma, Supabase
 │   └── modules/             # 도메인 모듈 (auth/users/master/trips/checklists/llm/analytics)
 └── test/
 ```
@@ -56,9 +56,9 @@ npm install
 # 2) .env 준비 (.env.example 기본값이 docker-compose 와 일치)
 cp .env.example .env
 
-# 3) 로컬 Postgres + Redis 기동
+# 3) 로컬 Postgres 기동
 docker compose up -d
-# 확인: docker ps | grep checkmate  →  두 컨테이너 모두 (healthy)
+# 확인: docker ps | grep checkmate  →  컨테이너 (healthy)
 
 # 4) DB 마이그레이션 & 마스터 데이터 시드
 npx prisma migrate dev --name init
@@ -77,7 +77,7 @@ curl http://localhost:8080/api/master/countries
 
 | 명령 | 설명 |
 | --- | --- |
-| `docker compose up -d` / `down` | 로컬 Postgres(5432) + Redis(6379) 기동/중지 |
+| `docker compose up -d` / `down` | 로컬 Postgres(5432) 기동/중지 |
 | `npx prisma migrate dev` | 스키마 변경 시 새 마이그레이션 생성/적용 |
 | `npx prisma studio` | DB GUI (http://localhost:5555) |
 | `npx ts-node --transpile-only prisma/seed.ts` | 마스터 데이터 재시드 (idempotent) |
