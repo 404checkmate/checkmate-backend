@@ -35,7 +35,7 @@ npm run prisma:seed       # Seed database
 npm run llm:test          # scripts/test-llm.ts smoke test
 ```
 
-Local infrastructure (Postgres) via Docker:
+Local Postgres via Docker (optional — production/dev DB is Supabase PostgreSQL; or point `DATABASE_URL` at any Postgres):
 ```bash
 docker-compose up -d
 ```
@@ -53,7 +53,7 @@ Every incoming request passes through globally-registered providers in `app.modu
 
 ### Authentication Flow
 
-- Supabase handles OAuth (Google / Kakao / Naver) and issues JWTs.
+- Supabase handles OAuth (Google / Kakao) and issues JWTs.
 - `SupabaseJwtGuard` decodes and verifies the JWT, then populates `request.user` as `AuthUser { supabaseId, userId, email, provider }`.
 - **JIT user provisioning**: on the first successful auth for an unknown Supabase ID, `UsersService.findOrCreate()` inserts a new `User` row automatically.
 - `@CurrentUser()` decorator injects the `AuthUser` from the request. `@Public()` bypasses the guard entirely.

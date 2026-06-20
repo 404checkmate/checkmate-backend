@@ -47,37 +47,36 @@ checkmate-backend/
 └── test/
 ```
 
-## Getting Started (로컬 Docker)
+## Getting Started
 
 ```bash
 # 1) 의존성 설치
 npm install
 
-# 2) .env 준비 (.env.example 기본값이 docker-compose 와 일치)
+# 2) .env 준비 — DATABASE_URL / DIRECT_URL 에 Postgres 연결 문자열 입력
+#    운영·개발 DB 는 Supabase PostgreSQL (managed). .env.example 참고.
 cp .env.example .env
 
-# 3) 로컬 Postgres 기동
-docker compose up -d
-# 확인: docker ps | grep checkmate  →  컨테이너 (healthy)
-
-# 4) DB 마이그레이션 & 마스터 데이터 시드
+# 3) DB 마이그레이션 & 마스터 데이터 시드
 npx prisma migrate dev --name init
 npx ts-node --transpile-only prisma/seed.ts
 
-# 5) 개발 서버
+# 4) 개발 서버
 npm run start:dev
 # -> http://localhost:8080/api
 
-# 6) 스모크 테스트
+# 5) 스모크 테스트
 curl http://localhost:8080/api/auth/health
 curl http://localhost:8080/api/master/countries
 ```
+
+> 로컬에서 Postgres 를 직접 띄우고 싶다면 `docker compose up -d` 로 컨테이너를 쓸 수 있습니다 (선택). 별도 설정 없이 Supabase `DATABASE_URL` 을 그대로 사용해도 됩니다.
 
 ### 주요 스크립트
 
 | 명령 | 설명 |
 | --- | --- |
-| `docker compose up -d` / `down` | 로컬 Postgres(5432) 기동/중지 |
+| `docker compose up -d` / `down` | (선택) 로컬 Postgres(5432) 기동/중지 |
 | `npx prisma migrate dev` | 스키마 변경 시 새 마이그레이션 생성/적용 |
 | `npx prisma studio` | DB GUI (http://localhost:5555) |
 | `npx ts-node --transpile-only prisma/seed.ts` | 마스터 데이터 재시드 (idempotent) |
