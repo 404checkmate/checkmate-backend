@@ -7,13 +7,13 @@
 ### 준비는 쉽게, 여행은 완벽하게
 AI 맞춤 여행 체크리스트 서비스의 백엔드 API 서버 (NestJS 11)
 
-[![Status](https://img.shields.io/badge/⏸️_운영_일시_중단-재개_예정-EAB308?style=for-the-badge)](https://checkmate-v.com)
+[![Status](https://img.shields.io/badge/🟢_Live-checkmate--v.com-22C55E?style=for-the-badge)](https://checkmate-v.com)
 [![Frontend](https://img.shields.io/badge/Frontend-Repo-FBBF24?style=for-the-badge&logo=github&logoColor=white)](https://github.com/404checkmate/Checkmate-Frontend)
 
 <br/>
 
-> ⏸️ **운영 일시 중단(재개 예정)** — EC2는 비용 최적화를 위해 종료, 데이터는 Supabase에 보존.
-> *Paused for cost; EC2 stopped, data preserved on Supabase, relaunch planned.*
+> 🟢 **운영 중 · Live** — [checkmate-v.com](https://checkmate-v.com) 에서 서비스 중. API는 AWS EC2, 데이터는 Supabase.
+> *Live at checkmate-v.com; API on AWS EC2, data on Supabase.*
 
 </div>
 
@@ -121,7 +121,7 @@ JWT 는 Supabase Auth 세션에서 `access_token` 을 꺼내
 
 ## 🔗 관련 링크 · Links
 
-- ⏸️ **Live**: [checkmate-v.com](https://checkmate-v.com) — 운영 일시 중단(재개 예정) · Paused, relaunch planned
+- 🟢 **Live**: [checkmate-v.com](https://checkmate-v.com) — 운영 중 · Live
 - 🎨 **Frontend**: [404checkmate/Checkmate-Frontend](https://github.com/404checkmate/Checkmate-Frontend)
 
 <div align="center">
