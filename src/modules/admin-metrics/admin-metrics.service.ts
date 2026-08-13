@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../infra/prisma/prisma.service';
+import type { CsvRow, CsvSection } from './csv.util';
 
 /**
  * 스크럼 대시보드 지표 조회.
@@ -542,5 +543,76 @@ export class AdminMetricsService {
         summary: { ...(totalRows[0] ?? {}), ...(summaryRows[0] ?? {}) },
       };
     });
+  }
+
+  /**
+   * 내보내기 대상 데이터셋 목록 — 대시보드에 그려지는 것과 동일한 집계.
+   * 새 지표를 추가하면 여기에도 한 줄 추가해야 파일에 포함된다.
+   */
+  static readonly EXPORT_DATASETS: ReadonlyArray<{ key: string; label: string }> = [
+    { key: 'funnel', label: '일별 핵심 퍼널 (방문→탐색→항목선택→저장시도→실제저장 / 로그인→여행생성)' },
+    { key: 'logins', label: '일별 신규 로그인 + 누적 로그인 유저' },
+    { key: 'channels', label: '일별 유입 채널별 세션 (utm_source → referrer → direct/unknown)' },
+    { key: 'content_gap', label: '목적지별 여행 생성수 vs 큐레이션 아티클 보유 여부 (전체 기간 · 기간필터 무시)' },
+    { key: 'retention', label: '가입 코호트별 D1/D7 리텐션 (가입일 기준 기간필터)' },
+    { key: 'save_retention', label: '저장 경험 유저 vs 미저장 유저 재방문율 (전체 기간 · 기간필터 무시)' },
+    { key: 'guest_preview', label: '게스트 프리뷰 퍼널 (비로그인 저장 플로우)' },
+    { key: 'travel_test', label: '여행 스타일 테스트 퍼널 (진입→시작→완료→공유/체크리스트)' },
+    { key: 'travel_test_types', label: '여행 스타일 테스트 결과 유형 분포' },
+    { key: 'collab', label: '친구·협업 퍼널 (초대→수락 일별 이벤트 수)' },
+    { key: 'ad_targeting', label: '광고 타겟 항목 TOP15 (탐색 담기 클릭 점유율 + 저장 유저수)' },
+    { key: 'affiliate_clicks_daily', label: '제휴 클릭 일별 추이 (provider별)' },
+    { key: 'affiliate_clicks_by_provider', label: '제휴 클릭 provider별 합계' },
+    { key: 'affiliate_clicks_top_items', label: '제휴 클릭 항목별 TOP15' },
+    { key: 'affiliate_clicks_summary', label: '제휴 클릭 요약 (탐색·저장 세션 대비 클릭 비율)' },
+  ];
+
+  /**
+   * 대시보드 전체(또는 지정 1개) 데이터셋을 행 배열 형태로 모아 반환.
+   * 각 지표 메서드를 그대로 재사용하므로 60초 캐시와 집계 규칙이 화면과 동일하다.
+   */
+  async exportDatasets(from: string, to: string, only?: string): Promise<CsvSection[]> {
+    const wanted = !only || only === 'all' ? null : only;
+    const want = (key: string) => wanted === null || wanted === key;
+    const rowsOf = async (run: () => Promise<unknown>) => (await run()) as CsvRow[];
+
+    const collected = new Map<string, CsvRow[]>();
+
+    if (want('funnel')) collected.set('funnel', await rowsOf(() => this.funnel(from, to)));
+    if (want('logins')) collected.set('logins', await rowsOf(() => this.logins(from, to)));
+    if (want('channels')) collected.set('channels', await rowsOf(() => this.channels(from, to)));
+    if (want('content_gap')) collected.set('content_gap', await rowsOf(() => this.contentGap()));
+    if (want('retention')) collected.set('retention', await rowsOf(() => this.retention(from, to)));
+    if (want('save_retention')) collected.set('save_retention', await rowsOf(() => this.saveRetention()));
+    if (want('guest_preview')) collected.set('guest_preview', await rowsOf(() => this.guestPreview(from, to)));
+    if (want('travel_test')) collected.set('travel_test', await rowsOf(() => this.travelTest(from, to)));
+    if (want('travel_test_types'))
+      collected.set('travel_test_types', await rowsOf(() => this.travelTestTypes(from, to)));
+    if (want('collab')) collected.set('collab', await rowsOf(() => this.collab(from, to)));
+    if (want('ad_targeting')) collected.set('ad_targeting', await rowsOf(() => this.adTargeting(from, to)));
+
+    // 제휴 클릭은 한 번의 호출이 4개 표를 함께 반환한다 (캐시 공유).
+    const affKeys = [
+      'affiliate_clicks_daily',
+      'affiliate_clicks_by_provider',
+      'affiliate_clicks_top_items',
+      'affiliate_clicks_summary',
+    ];
+    if (affKeys.some(want)) {
+      const aff = await this.affiliateClicks(from, to);
+      if (want('affiliate_clicks_daily')) collected.set('affiliate_clicks_daily', aff.daily as CsvRow[]);
+      if (want('affiliate_clicks_by_provider'))
+        collected.set('affiliate_clicks_by_provider', aff.byProvider as CsvRow[]);
+      if (want('affiliate_clicks_top_items'))
+        collected.set('affiliate_clicks_top_items', aff.topItems as CsvRow[]);
+      if (want('affiliate_clicks_summary')) collected.set('affiliate_clicks_summary', [aff.summary as CsvRow]);
+    }
+
+    // EXPORT_DATASETS 순서를 유지해 파일 구성이 매번 동일하게 나오도록 한다.
+    return AdminMetricsService.EXPORT_DATASETS.filter((d) => collected.has(d.key)).map((d) => ({
+      key: d.key,
+      label: d.label,
+      rows: collected.get(d.key) ?? [],
+    }));
   }
 }

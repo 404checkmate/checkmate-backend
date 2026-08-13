@@ -59,6 +59,8 @@ async function bootstrap() {
     credentials: allowCredentials,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type', 'Accept', 'X-Requested-With'],
+    // 프론트가 절대 URL로 교차 출처 호출하므로, 파일 다운로드 파일명을 읽으려면 명시적 노출이 필요하다.
+    exposedHeaders: ['Content-Disposition'],
   });
 
   app.useGlobalPipes(

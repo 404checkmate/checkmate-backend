@@ -49,3 +49,6 @@ scripts/pm2.cjs
 scripts/pm3.cjs
 scripts/presentation-metrics.cjs
 scripts/ad-targeting.cjs
+
+# 지표 추출 결과물(원본 DB 덤프 = PII 포함) — 커밋 금지
+exports/
