@@ -31,6 +31,29 @@ export class AdminMetricsService {
     return Prisma.join(emails.length > 0 ? emails : ['__none__']);
   }
 
+  /**
+   * 자사 도메인 호스트 목록 — CORS_ORIGIN 에서 유도한다(하드코딩 방지).
+   * 사이트 내부 이동으로 생긴 referrer 를 외부 유입으로 착각하지 않기 위한 것.
+   */
+  private selfHosts(): Prisma.Sql {
+    const raw = this.config.get<string>('app.corsOrigin') ?? '';
+    const hosts = raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && s !== '*')
+      .map((origin) => {
+        try {
+          // host 쪽도 www. 를 떼고 비교하므로 여기서도 맞춰준다
+          return new URL(origin).hostname.toLowerCase().replace(/^www\./, '');
+        } catch {
+          return '';
+        }
+      })
+      .filter(Boolean);
+    const unique = Array.from(new Set(hosts));
+    return Prisma.join(unique.length > 0 ? unique : ['__none__']);
+  }
+
   private async cached<T>(key: string, run: () => Promise<T>): Promise<T> {
     const hit = this.cache.get(key);
     if (hit && Date.now() - hit.at < AdminMetricsService.CACHE_TTL_MS) return hit.data as T;
@@ -149,30 +172,145 @@ export class AdminMetricsService {
     );
   }
 
-  /** 쿼리 4. 유입 채널별 세션 — session_start 에 utm_source/referrer 계측 필요 */
-  channels(from: string, to: string) {
-    return this.cached(`channels:${from}:${to}`, () =>
-      this.prisma.$queryRaw`
-        with real_events as (${this.realEventsSql(from, to)}),
-        session_source as (
-          select
-            session_id,
-            min(occurred_at)::date as day,
+  /** 일별 채널 표에서 개별 노출할 상위 채널 수 — 나머지는 '기타' 로 묶어 행 폭증을 막는다 */
+  private static readonly CHANNEL_DAILY_TOP_N = 6;
+  /** 채널 하나당 드릴다운으로 보여줄 원본 referrer 수 */
+  private static readonly CHANNEL_REFERRERS_PER_CHANNEL = 5;
+
+  /**
+   * 채널 집계 공통 CTE.
+   * session_start 의 utm_source(토큰) → referrer(URL) → direct/unknown 순으로 출처를 정하고,
+   * URL 이면 host 를 뽑아 매체 단위 라벨로 정규화한다.
+   * 정규화 전에는 같은 네이버 카페 글이 쿼리스트링 차이만으로 각각 다른 행이 되어
+   * (날짜 × 원본URL) 카디널리티가 수백 행까지 부풀었다.
+   */
+  private channelsCte(from: string, to: string): Prisma.Sql {
+    return Prisma.sql`
+      real_events as (${this.realEventsSql(from, to)}),
+      session_source as (
+        select
+          session_id,
+          min(occurred_at)::date as day,
+          coalesce(
+            (array_agg(metadata->>'utm_source') filter (where metadata->>'utm_source' is not null))[1],
+            (array_agg(metadata->>'referrer')   filter (where metadata->>'referrer'   is not null))[1],
+            'direct/unknown'
+          ) as source
+        from real_events
+        where event_type = 'session_start'
+        group by session_id
+      ),
+      hosted as (
+        select
+          session_id,
+          day,
+          source,
+          -- URL 이면 스킴 뒤 host, utm_source 처럼 토큰이면 값 자체.
+          -- www. 는 떼어낸다 (www.example.com 과 example.com 이 다른 채널로 갈리는 것 방지)
+          regexp_replace(
             coalesce(
-              (array_agg(metadata->>'utm_source') filter (where metadata->>'utm_source' is not null))[1],
-              (array_agg(metadata->>'referrer')   filter (where metadata->>'referrer'   is not null))[1],
-              'direct/unknown'
-            ) as channel
-          from real_events
-          where event_type = 'session_start'
-          group by session_id
-        )
-        select day::text as day, channel, count(*)::int as sessions
+              nullif(lower(substring(source from '^[a-zA-Z][a-zA-Z0-9+.-]*://([^/?#]+)')), ''),
+              lower(source)
+            ),
+            '^www\\.', ''
+          ) as host
         from session_source
-        group by day, channel
-        order by day desc, sessions desc
-      `,
-    );
+      ),
+      labeled as (
+        select
+          session_id,
+          day,
+          source,
+          case
+            when host = 'direct/unknown'                                            then 'direct/unknown'
+            when host in (${this.selfHosts()})                                       then '내부이동(자사)'
+            when host like '%cafe.naver.com'                                         then '네이버 카페'
+            when host like '%blog.naver.com'                                         then '네이버 블로그'
+            when host like '%search.naver.com'                                       then '네이버 검색'
+            when host like '%naver.com' or host = 'naver'                            then '네이버 기타'
+            when host like '%kakao.com'  or host like '%kakaocdn.net'
+              or host like '%daum.net'   or host in ('kakao', 'kakaotalk')           then '카카오'
+            -- 'ig' 는 우리가 광고에 심는 utm_source 토큰 (utm_medium=paid|social)
+            when host like '%instagram.com' or host in ('instagram', 'insta', 'ig')  then '인스타그램'
+            when host like '%google.%'      or host = 'google'                       then '구글'
+            when host like '%youtube.%'     or host like '%youtu.be'                 then '유튜브'
+            when host like '%facebook.%'    or host like '%fb.%'                     then '페이스북'
+            when host like '%threads.%'                                              then '스레드'
+            when host like '%tiktok.%'                                               then '틱톡'
+            when host like '%x.com' or host like '%twitter.com'                      then 'X(트위터)'
+            else host
+          end as channel
+        from hosted
+      )
+    `;
+  }
+
+  /**
+   * 쿼리 4. 유입 채널별 세션.
+   * summary(기간 합계·기본 뷰) / daily(일별 전개·상위 N + 기타) / referrers(채널별 원본 URL 드릴다운).
+   */
+  channels(from: string, to: string) {
+    return this.cached(`channels:${from}:${to}`, async () => {
+      // 3개 표를 한 번의 왕복으로 받는다. 쿼리를 나누면 무거운 labeled CTE(user_events 전체 스캔)를
+      // 세 번 다시 계산하게 되어 응답이 1초를 넘었다. 여러 번 참조되는 CTE 는 PG 가 한 번만 실체화한다.
+      const rows = (await this.prisma.$queryRaw`
+        with ${this.channelsCte(from, to)},
+        summary as (
+          select
+            channel,
+            count(*)::int                                             as sessions,
+            round(100.0 * count(*) / sum(count(*)) over (), 1)::float  as share_pct
+          from labeled
+          group by channel
+          order by count(*) desc, channel
+          limit 20
+        ),
+        top_channels as (
+          select channel
+          from labeled
+          group by channel
+          order by count(*) desc, channel
+          limit ${AdminMetricsService.CHANNEL_DAILY_TOP_N}
+        ),
+        daily as (
+          select
+            day::text as day,
+            case when channel in (select channel from top_channels) then channel else '기타' end as channel,
+            count(*)::int as sessions
+          from labeled
+          group by 1, 2
+        ),
+        ranked as (
+          select
+            channel,
+            source,
+            count(*)::int                                                        as sessions,
+            row_number() over (partition by channel order by count(*) desc, source) as rn
+          from labeled
+          where source <> 'direct/unknown'
+          group by channel, source
+        ),
+        referrers as (
+          select channel, source, sessions
+          from ranked
+          where rn <= ${AdminMetricsService.CHANNEL_REFERRERS_PER_CHANNEL}
+        )
+        select
+          (select coalesce(json_agg(t order by t.sessions desc, t.channel), '[]'::json)
+             from summary t)   as summary,
+          (select coalesce(json_agg(t order by t.day desc, t.sessions desc, t.channel), '[]'::json)
+             from daily t)     as daily,
+          (select coalesce(json_agg(t order by t.channel, t.sessions desc), '[]'::json)
+             from referrers t) as referrers
+      `) as Array<{ summary: unknown[]; daily: unknown[]; referrers: unknown[] }>;
+
+      const row = rows[0];
+      return {
+        summary: row?.summary ?? [],
+        daily: row?.daily ?? [],
+        referrers: row?.referrers ?? [],
+      };
+    });
   }
 
   /** 쿼리 7. 목적지 탐색수 vs 아티클 보유 (전체 기간) */
@@ -552,7 +690,9 @@ export class AdminMetricsService {
   static readonly EXPORT_DATASETS: ReadonlyArray<{ key: string; label: string }> = [
     { key: 'funnel', label: '일별 핵심 퍼널 (방문→탐색→항목선택→저장시도→실제저장 / 로그인→여행생성)' },
     { key: 'logins', label: '일별 신규 로그인 + 누적 로그인 유저' },
-    { key: 'channels', label: '일별 유입 채널별 세션 (utm_source → referrer → direct/unknown)' },
+    { key: 'channels', label: '유입 채널별 세션 합계 (매체 단위 정규화 · 기간 전체)' },
+    { key: 'channels_daily', label: `일별 유입 채널별 세션 (상위 ${AdminMetricsService.CHANNEL_DAILY_TOP_N}개 채널 + 기타)` },
+    { key: 'channels_referrers', label: '채널별 원본 referrer/utm_source TOP5 (정규화 이전 값)' },
     { key: 'content_gap', label: '목적지별 여행 생성수 vs 큐레이션 아티클 보유 여부 (전체 기간 · 기간필터 무시)' },
     { key: 'retention', label: '가입 코호트별 D1/D7 리텐션 (가입일 기준 기간필터)' },
     { key: 'save_retention', label: '저장 경험 유저 vs 미저장 유저 재방문율 (전체 기간 · 기간필터 무시)' },
@@ -580,7 +720,6 @@ export class AdminMetricsService {
 
     if (want('funnel')) collected.set('funnel', await rowsOf(() => this.funnel(from, to)));
     if (want('logins')) collected.set('logins', await rowsOf(() => this.logins(from, to)));
-    if (want('channels')) collected.set('channels', await rowsOf(() => this.channels(from, to)));
     if (want('content_gap')) collected.set('content_gap', await rowsOf(() => this.contentGap()));
     if (want('retention')) collected.set('retention', await rowsOf(() => this.retention(from, to)));
     if (want('save_retention')) collected.set('save_retention', await rowsOf(() => this.saveRetention()));
@@ -590,6 +729,15 @@ export class AdminMetricsService {
       collected.set('travel_test_types', await rowsOf(() => this.travelTestTypes(from, to)));
     if (want('collab')) collected.set('collab', await rowsOf(() => this.collab(from, to)));
     if (want('ad_targeting')) collected.set('ad_targeting', await rowsOf(() => this.adTargeting(from, to)));
+
+    // 채널은 한 번의 호출이 3개 표를 함께 반환한다 (캐시 공유).
+    const channelKeys = ['channels', 'channels_daily', 'channels_referrers'];
+    if (channelKeys.some(want)) {
+      const ch = await this.channels(from, to);
+      if (want('channels')) collected.set('channels', ch.summary as CsvRow[]);
+      if (want('channels_daily')) collected.set('channels_daily', ch.daily as CsvRow[]);
+      if (want('channels_referrers')) collected.set('channels_referrers', ch.referrers as CsvRow[]);
+    }
 
     // 제휴 클릭은 한 번의 호출이 4개 표를 함께 반환한다 (캐시 공유).
     const affKeys = [
