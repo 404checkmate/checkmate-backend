@@ -21,6 +21,11 @@ services:
     buildCommand: npm ci --include=dev && npx prisma generate && npm run build
     startCommand: node dist/main.js
     healthCheckPath: /api/health
+    # 프론트(vercel.json)가 /api/* 를 이 도메인으로 리라이트하므로 주소를 유지한다.
+    # Route53 에 api → CNAME → <서비스>.onrender.com 이 있어야 Verified 로 넘어간다.
+    # TLS 인증서는 Render 가 Let's Encrypt 로 자동 발급·갱신한다.
+    domains:
+      - api.checkmate-v.com
     envVars:
       - key: NODE_VERSION
         value: '22'
