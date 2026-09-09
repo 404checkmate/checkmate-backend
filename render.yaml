@@ -1,0 +1,64 @@
+# Render Blueprint — Checkmate API (무료 배포)
+#
+# 적용: Render 대시보드 → New → Blueprint → 이 레포 연결 → main 브랜치
+# 값이 없는(sync: false) 항목은 Render 대시보드에서 직접 입력한다. 절대 여기에 적지 않는다.
+#
+# 참고:
+# - PORT 는 Render 가 주입하므로 여기서 정의하지 않는다. main.ts 가 process.env.PORT 를 읽는다.
+# - DB 는 Supabase 를 그대로 쓴다. Render 무료 Postgres 는 30일 후 만료되므로 붙이지 않는다.
+# - healthCheckPath 는 배포 시 정상 기동 확인용이며, 무료 인스턴스의 15분 슬립을 막아주지는
+#   않는다. 슬립 방지는 외부 모니터(UptimeRobot 등)가 /api/health 를 주기적으로 호출해야 한다.
+services:
+  - type: web
+    name: checkmate-api
+    runtime: node
+    plan: free
+    region: singapore # Render 무료 리전 중 한국에서 가장 가까움
+    branch: main
+    buildCommand: npm ci && npx prisma generate && npm run build
+    startCommand: node dist/main.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: '22'
+      - key: NODE_ENV
+        value: production
+      - key: API_PREFIX
+        value: api
+
+      # 프로덕션에서 true 면 부팅이 실패한다 (validation.ts superRefine)
+      - key: AUTH_DEV_BYPASS
+        value: 'false'
+
+      - key: CORS_ORIGIN
+        value: https://checkmate-v.com,https://www.checkmate-v.com
+      - key: FRONTEND_AUTH_CALLBACK_URL
+        value: https://checkmate-v.com/auth/callback
+
+      - key: LLM_PROVIDER
+        value: openai
+      - key: LLM_MODEL
+        value: gpt-4o-mini
+
+      # --- 아래는 대시보드에서 직접 입력 (시크릿) ---
+      # DATABASE_URL: Supabase Connection Pooling 문자열 (포트 6543, ?pgbouncer=true)
+      - key: DATABASE_URL
+        sync: false
+      # DIRECT_URL: Supabase 직접 연결 문자열 (포트 5432) — prisma migrate 용
+      - key: DIRECT_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: SUPABASE_JWT_SECRET
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+      # LLM_API_KEY: OpenAI 키. 이름이 OPENAI_API_KEY 가 아님에 주의 (configuration.ts 기준)
+      - key: LLM_API_KEY
+        sync: false
+      - key: ADMIN_EMAILS
+        sync: false
+      - key: TEAM_MEMBER_EMAILS
+        sync: false

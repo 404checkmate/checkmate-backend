@@ -12,6 +12,7 @@ import { SupabaseModule } from './infra/supabase/supabase.module';
 import { SupabaseJwtGuard } from './common/guards/supabase-jwt.guard';
 import { LoggingInterceptor } from './common/interceptors/logging.interceptor';
 
+import { HealthModule } from './modules/health/health.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { MasterModule } from './modules/master/master.module';
@@ -39,6 +40,7 @@ import { AffiliateLinksModule } from './modules/affiliate-links/affiliate-links.
     PrismaModule,
     SupabaseModule,
 
+    HealthModule,
     AuthModule,
     UsersModule,
     MasterModule,
